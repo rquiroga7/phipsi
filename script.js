@@ -688,106 +688,40 @@ function makeClashPair(a,b, overlaps){
   const sum=(ra+rb)*scale;
   if(d < sum && d > 0.01){
     const raa=ra*scale, rbb=rb*scale;
-    // Intersection circle of the two VdW spheres: distance t from center a
-    const t=(raa*raa - rbb*rbb + d*d)/(2*d);
-    if(t < 0 || t > d) return; // fully contained – no lens
-    const lensR=Math.sqrt(Math.max(0, raa*raa - t*t));
-    if(!isFinite(lensR) || lensR<=0.01) return;
-    // axis unit u from a to b, plus perpendicular basis v,w
+    // axis u from a to b, orthonormal basis v,w
     const ux=(b.x-a.x)/d, uy=(b.y-a.y)/d, uz=(b.z-a.z)/d;
-    let vx,vy,vz;
-    if(Math.abs(ux) < 0.9){ vx=1; vy=0; vz=0; }
-    else { vx=0; vy=1; vz=0; }
-    const dotvu=vx*ux+vy*uy+vz*uz;
-    vx-=dotvu*ux; vy-=dotvu*uy; vz-=dotvu*uz;
+    let vx=Math.abs(ux)<0.9?1:0, vy=Math.abs(ux)<0.9?0:1, vz=0;
+    const dvu=vx*ux+vy*uy+vz*uz;
+    vx-=dvu*ux; vy-=dvu*uy; vz-=dvu*uz;
     const vl=Math.hypot(vx,vy,vz)||1;
     vx/=vl; vy/=vl; vz/=vl;
     const wx=uy*vz-uz*vy, wy=uz*vx-ux*vz, wz=ux*vy-uy*vx;
-
-    const segs=18, rings=5;
-    const verts=[], normals=[], colors=[], faces=[];
-    // ---------- Cap of sphere a (points on A's surface inside B) ----------
-    const thMaxA=Math.acos(Math.min(1, Math.max(-1, t/raa)));
-    const ringA=[];
-    // pole (point on A along +u)
-    verts.push(new $3Dmol.Vector3(a.x+raa*ux, a.y+raa*uy, a.z+raa*uz));
-    normals.push(new $3Dmol.Vector3(ux,uy,uz));
-    colors.push({r:1.0,g:0.55,b:0.0});
-    const poleA=verts.length-1;
-    for(let k=1;k<=rings;k++){
-      const th=thMaxA*k/rings, st=Math.sin(th), ct=Math.cos(th);
-      const ring=[];
-      for(let i=0;i<segs;i++){
-        const ph=i/segs*2*Math.PI, cp=Math.cos(ph), sp=Math.sin(ph);
-        const lx=st*cp, ly=st*sp;
-        const rdx=lx*vx+ly*wx+ct*ux, rdy=lx*vy+ly*wy+ct*uy, rdz=lx*vz+ly*wz+ct*uz;
-        verts.push(new $3Dmol.Vector3(a.x+raa*rdx, a.y+raa*rdy, a.z+raa*rdz));
-        normals.push(new $3Dmol.Vector3(rdx,rdy,rdz));
-        colors.push({r:1.0,g:0.55,b:0.0});
-        ring.push(verts.length-1);
+    // Fill the exact intersection volume (sphere A ∩ sphere B) with small
+    // orange translucent spheres -> a smooth blobby lens, uniformly lit,
+    // no backface/dark side; tips poke slightly past the whitish VdW surface.
+    const lensR0=Math.sqrt(Math.max(0, raa*raa - Math.pow(Math.max(0,(raa*raa-rbb*rbb+d*d)/(2*d)),2)));
+    const rs=Math.min(0.20, lensR0*0.35);
+    const s1min=Math.max(0, d-rbb);
+    const s1max=Math.min(raa, d);
+    if(s1min >= s1max) return;
+    const step=rs*0.85;
+    for(let s1=s1min; s1<=s1max+1e-6; s1+=step){
+      const rlat=Math.min(Math.sqrt(Math.max(0, raa*raa-s1*s1)), Math.sqrt(Math.max(0, rbb*rbb-(d-s1)*(d-s1))));
+      if(rlat<=0.02) continue;
+      const ringN=Math.max(1, Math.round(rlat/step));
+      for(let k=0;k<ringN;k++){
+        const rr=(k+0.5)/ringN*rlat;
+        const nAng=Math.max(4, Math.round(2*Math.PI*rr/step));
+        for(let t2=0;t2<nAng;t2++){
+          const ang=t2/nAng*2*Math.PI, cp=Math.cos(ang), sp=Math.sin(ang);
+          const lx=rr*cp, ly=rr*sp;
+          const px=a.x+ux*s1+vx*lx+wx*ly;
+          const py=a.y+uy*s1+vy*lx+wy*ly;
+          const pz=a.z+uz*s1+vz*lx+wz*ly;
+          const s=viewer.addSphere({center:{x:px,y:py,z:pz}, radius:rs*1.35, color:'orange', opacity:0.85});
+          clashShapes.push(s);
+        }
       }
-      ringA.push(ring);
-    }
-    for(let i=0;i<segs;i++){
-      faces.push(poleA, ringA[0][(i+1)%segs], ringA[0][i]);
-    }
-    for(let k=0;k<rings-1;k++){
-      for(let i=0;i<segs;i++){
-        const i2=(i+1)%segs;
-        faces.push(ringA[k][i], ringA[k][i2], ringA[k+1][i2]);
-        faces.push(ringA[k][i], ringA[k+1][i2], ringA[k+1][i]);
-      }
-    }
-    // ---------- Cap of sphere b (points on B's surface inside A) ----------
-    const thMaxB=Math.acos(Math.min(1, Math.max(-1, (d-t)/rbb)));
-    const ringB=[];
-    verts.push(new $3Dmol.Vector3(b.x-rbb*ux, b.y-rbb*uy, b.z-rbb*uz));
-    normals.push(new $3Dmol.Vector3(-ux,-uy,-uz));
-    colors.push({r:1.0,g:0.55,b:0.0});
-    const poleB=verts.length-1;
-    for(let k=1;k<=rings;k++){
-      const th=thMaxB*k/rings, st=Math.sin(th), ct=Math.cos(th);
-      const ring=[];
-      for(let i=0;i<segs;i++){
-        const ph=i/segs*2*Math.PI, cp=Math.cos(ph), sp=Math.sin(ph);
-        const lx=st*cp, ly=st*sp;
-        const rdx=lx*vx+ly*wx-ct*ux, rdy=lx*vy+ly*wy-ct*uy, rdz=lx*vz+ly*wz-ct*uz;
-        verts.push(new $3Dmol.Vector3(b.x+rbb*rdx, b.y+rbb*rdy, b.z+rbb*rdz));
-        normals.push(new $3Dmol.Vector3(rdx,rdy,rdz));
-        colors.push({r:1.0,g:0.55,b:0.0});
-        ring.push(verts.length-1);
-      }
-      ringB.push(ring);
-    }
-    for(let i=0;i<segs;i++){
-      faces.push(poleB, ringB[0][(i+1)%segs], ringB[0][i]);
-    }
-    for(let k=0;k<rings-1;k++){
-      for(let i=0;i<segs;i++){
-        const i2=(i+1)%segs;
-        faces.push(ringB[k][i], ringB[k][i2], ringB[k+1][i2]);
-        faces.push(ringB[k][i], ringB[k+1][i2], ringB[k+1][i]);
-      }
-    }
-    // Both caps share the same rim (intersection circle), closing the lens volume.
-    const spec={vertexArr:verts, normalArr:normals, faceArr:faces, color:colors, opacity:0.6};
-    try{
-      const shape=viewer.addCustom(spec);
-      if(shape && shape.setColor){
-        try{ shape.setColor(0xffa500, 0.85); }catch(e){}
-      }
-      // Double-sided so both caps render orange (no dark culled side)
-      if(shape && shape.material){
-        try{
-          shape.material.side = 2; // THREE.DoubleSide
-          shape.material.needsUpdate = true;
-          shape.material.depthWrite = false;
-        }catch(e){}
-      }
-      clashShapes.push(shape);
-    }catch(e){
-      const s=viewer.addSphere({center:{x:a.x+(b.x-a.x)*t/d, y:a.y+(b.y-a.y)*t/d, z:a.z+(b.z-a.z)*t/d}, radius:lensR*0.8, color:'orange', opacity:0.85});
-      clashShapes.push(s);
     }
   }
 }
