@@ -372,13 +372,14 @@ function rotateAtomsAboutAxis(axisA, axisB, angleDeg, predicate){
 }
 
 function isMovingAtomForPhi(atom){
-  // phi rotates about N-CA, should move the N-terminal peptide plane (hPlane: 15.CA,15.O,16.H)
-  // so moving set is Lys15 (CA,C,O) plus H of Ala16. The central CA,C,O,CB and downstream Arg stay.
-  if(atom.resi===15) return true;
+  // phi N-CA: per alanine dipeptide spec, rotating phi moves CH3 (CB), CA and C' (C,O) together against NH
+  // so moving set is C-terminal: Ala CA/C/O/CB/HA + downstream Arg
+  if(atom.resi===15) return false;
   if(atom.resi===16){
-    if(atom.name==='H') return true;
-    return false;
+    if(atom.name==='N' || atom.name==='H') return false;
+    return true;
   }
+  if(atom.resi===17) return true;
   return false;
 }
 function isMovingAtomForPsi(atom){
@@ -412,8 +413,7 @@ function adjustDihedral(type,deltaDeg){
   let axisA, axisB, predicate;
   let isTri=!!(N&&CA&&C);
   if(isTri){
-    // phi upstream moves opposite sign, so invert delta
-    if(type==='phi'){ axisA={x:N.x,y:N.y,z:N.z}; axisB={x:CA.x,y:CA.y,z:CA.z}; predicate=isMovingAtomForPhi; highlightPhiPsi('phi'); deltaDeg=-deltaDeg; }
+    if(type==='phi'){ axisA={x:N.x,y:N.y,z:N.z}; axisB={x:CA.x,y:CA.y,z:CA.z}; predicate=isMovingAtomForPhi; highlightPhiPsi('phi'); }
     else { axisA={x:CA.x,y:CA.y,z:CA.z}; axisB={x:C.x,y:C.y,z:C.z}; predicate=isMovingAtomForPsi; highlightPhiPsi('psi'); }
     animating=true;
     animateRotation(axisA,axisB,deltaDeg,predicate,()=>{
@@ -452,7 +452,7 @@ function rotateDirect(type,deltaDeg,cb){
   let isTri=!!(N&&CA&&C);
   let axisA,axisB,predicate;
   if(isTri){
-    if(type==='phi'){ axisA={x:N.x,y:N.y,z:N.z}; axisB={x:CA.x,y:CA.y,z:CA.z}; predicate=isMovingAtomForPhi; deltaDeg=-deltaDeg; }
+    if(type==='phi'){ axisA={x:N.x,y:N.y,z:N.z}; axisB={x:CA.x,y:CA.y,z:CA.z}; predicate=isMovingAtomForPhi; }
     else { axisA={x:CA.x,y:CA.y,z:CA.z}; axisB={x:C.x,y:C.y,z:C.z}; predicate=isMovingAtomForPsi; }
     animateRotation(axisA,axisB,deltaDeg,predicate,cb);
   } else {
@@ -837,7 +837,7 @@ function moveToPhiPsi(targetPhi,targetPsi){
       if(Math.abs(remPhi)>0.3 || Math.abs(remPsi)>0.3){
         if(Math.abs(remPhi)>0.3){
           const N=findAtom(16,'N'), CA=findAtom(16,'CA');
-          if(N&&CA) rotateAtomsAboutAxis({x:N.x,y:N.y,z:N.z},{x:CA.x,y:CA.y,z:CA.z}, -remPhi, isMovingAtomForPhi);
+          if(N&&CA) rotateAtomsAboutAxis({x:N.x,y:N.y,z:N.z},{x:CA.x,y:CA.y,z:CA.z}, remPhi, isMovingAtomForPhi);
         }
         if(Math.abs(remPsi)>0.3){
           const CA=findAtom(16,'CA'), C=findAtom(16,'C');
@@ -854,7 +854,7 @@ function moveToPhiPsi(targetPhi,targetPsi){
     const N=findAtom(16,'N'), CA=findAtom(16,'CA'), C=findAtom(16,'C');
     if(Math.abs(dPhiStep) > 0.001 && N && CA){
       const axisA={x:N.x,y:N.y,z:N.z}, axisB={x:CA.x,y:CA.y,z:CA.z};
-      const ang=-dPhiStep*Math.PI/180; // invert for upstream phi
+      const ang=dPhiStep*Math.PI/180;
       const u={x:axisB.x-axisA.x,y:axisB.y-axisA.y,z:axisB.z-axisA.z};
       const un=normalize(u); const cosA=Math.cos(ang), sinA=Math.sin(ang);
       atomsData.forEach(a=>{
