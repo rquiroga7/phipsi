@@ -690,91 +690,29 @@ function makeClashPair(a,b, overlaps){
   const sum=(ra+rb)*scale;
   if(d < sum && d > 0.01){
     const raa=ra*scale, rbb=rb*scale;
-    // Intersection circle of the two VdW spheres: distance t from center a
     const t=(raa*raa - rbb*rbb + d*d)/(2*d);
-    if(t < 0 || t > d) return; // fully contained – no lens
+    if(t < 0 || t > d) return;
     const lensR=Math.sqrt(Math.max(0, raa*raa - t*t));
     if(!isFinite(lensR) || lensR<=0.01) return;
     // Record clashing atoms so their VdW spheres are skipped (avoid depth occlusion)
     clashAtomSerials.add(a.serial); clashAtomSerials.add(b.serial);
-    // axis unit u from a to b, plus perpendicular basis v,w
+    // axis unit u from a to b
     const ux=(b.x-a.x)/d, uy=(b.y-a.y)/d, uz=(b.z-a.z)/d;
-    let vx,vy,vz;
-    if(Math.abs(ux) < 0.9){ vx=1; vy=0; vz=0; }
-    else { vx=0; vy=1; vz=0; }
-    const dotvu=vx*ux+vy*uy+vz*uz;
-    vx-=dotvu*ux; vy-=dotvu*uy; vz-=dotvu*uz;
-    const vl=Math.hypot(vx,vy,vz)||1;
-    vx/=vl; vy/=vl; vz/=vl;
-    const wx=uy*vz-uz*vy, wy=uz*vx-ux*vz, wz=ux*vy-uy*vx;
-
-    const segs=18, rings=5;
-    const verts=[], normals=[], faces=[];
-    // ---------- Cap of sphere a (points on A's surface inside B) ----------
-    const thMaxA=Math.acos(Math.min(1, Math.max(-1, t/raa)));
-    const ringA=[];
-    verts.push({x:a.x+raa*ux, y:a.y+raa*uy, z:a.z+raa*uz});
-    normals.push({x:ux, y:uy, z:uz});
-    const poleA=verts.length-1;
-    for(let k=1;k<=rings;k++){
-      const th=thMaxA*k/rings, st=Math.sin(th), ct=Math.cos(th);
-      const ring=[];
-      for(let i=0;i<segs;i++){
-        const ph=i/segs*2*Math.PI, cp=Math.cos(ph), sp=Math.sin(ph);
-        const lx=st*cp, ly=st*sp;
-        const rdx=lx*vx+ly*wx+ct*ux, rdy=lx*vy+ly*wy+ct*uy, rdz=lx*vz+ly*wz+ct*uz;
-        verts.push({x:a.x+raa*rdx, y:a.y+raa*rdy, z:a.z+raa*rdz});
-        normals.push({x:rdx, y:rdy, z:rdz});
-        ring.push(verts.length-1);
-      }
-      ringA.push(ring);
-    }
-    for(let i=0;i<segs;i++){
-      faces.push(poleA, ringA[0][(i+1)%segs], ringA[0][i]);
-    }
-    for(let k=0;k<rings-1;k++){
-      for(let i=0;i<segs;i++){
-        const i2=(i+1)%segs;
-        faces.push(ringA[k][i], ringA[k][i2], ringA[k+1][i2]);
-        faces.push(ringA[k][i], ringA[k+1][i2], ringA[k+1][i]);
-      }
-    }
-    // ---------- Cap of sphere b (points on B's surface inside A) ----------
-    const thMaxB=Math.acos(Math.min(1, Math.max(-1, (d-t)/rbb)));
-    const ringB=[];
-    verts.push({x:b.x-rbb*ux, y:b.y-rbb*uy, z:b.z-rbb*uz});
-    normals.push({x:-ux, y:-uy, z:-uz});
-    const poleB=verts.length-1;
-    for(let k=1;k<=rings;k++){
-      const th=thMaxB*k/rings, st=Math.sin(th), ct=Math.cos(th);
-      const ring=[];
-      for(let i=0;i<segs;i++){
-        const ph=i/segs*2*Math.PI, cp=Math.cos(ph), sp=Math.sin(ph);
-        const lx=st*cp, ly=st*sp;
-        const rdx=lx*vx+ly*wx-ct*ux, rdy=lx*vy+ly*wy-ct*uy, rdz=lx*vz+ly*wz-ct*uz;
-        verts.push({x:b.x+rbb*rdx, y:b.y+rbb*rdy, z:b.z+rbb*rdz});
-        normals.push({x:rdx, y:rdy, z:rdz});
-        ring.push(verts.length-1);
-      }
-      ringB.push(ring);
-    }
-    for(let i=0;i<segs;i++){
-      faces.push(poleB, ringB[0][(i+1)%segs], ringB[0][i]);
-    }
-    for(let k=0;k<rings-1;k++){
-      for(let i=0;i<segs;i++){
-        const i2=(i+1)%segs;
-        faces.push(ringB[k][i], ringB[k][i2], ringB[k+1][i2]);
-        faces.push(ringB[k][i], ringB[k+1][i2], ringB[k+1][i]);
-      }
-    }
-    // Single orange color + DoubleSide -> MeshDoubleLambertMaterial lights both caps
-    const spec={vertexArr:verts, normalArr:normals, faceArr:faces, color:0xffa500, opacity:0.85, side:2};
-    try{
-      const shape=viewer.addCustom(spec);
-      clashShapes.push(shape);
-    }catch(e){
-      const s=viewer.addSphere({center:{x:a.x+(b.x-a.x)*t/d, y:a.y+(b.y-a.y)*t/d, z:a.z+(b.z-a.z)*t/d}, radius:lensR*0.8, color:'orange', opacity:0.85});
+    // Exact lens (sphere A ∩ sphere B) rendered as imposter spheres whose
+    // radius equals the lens radius at each axial slice -> smooth biconvex
+    // lens, uniformly lit (no black side), transparent orange.
+    const s1min=Math.max(0, d-rbb), s1max=Math.min(raa, d);
+    const slices=10;
+    for(let k=0;k<=slices;k++){
+      const s1=s1min+(s1max-s1min)*k/slices;
+      const rA=Math.sqrt(Math.max(0, raa*raa - s1*s1));
+      const rB=Math.sqrt(Math.max(0, rbb*rbb - (d-s1)*(d-s1)));
+      const r=Math.min(rA, rB)*0.96;
+      if(r < 0.05) continue;
+      const s=viewer.addSphere({
+        center:{x:a.x+ux*s1, y:a.y+uy*s1, z:a.z+uz*s1},
+        radius:r, color:'orange', opacity:0.85
+      });
       clashShapes.push(s);
     }
   }
