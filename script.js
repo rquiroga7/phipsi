@@ -618,75 +618,49 @@ function drawRamaHeat(){
       {x:[-180,180],y:[currentPsi,currentPsi],mode:'lines',line:{color:'red',width:1,dash:'dot'},hoverinfo:'none',showlegend:false}
     ]);
     const plot=document.getElementById('ramaplot');
-    // robust click: use plotly_click for heatmap and also handle clicking on marker/lines
-    plot.on('plotly_click',function(data){
-      let phi,psi;
-      if(data.points && data.points.length){
-        // for heatmap, point contains x/y; for all traces, the first point's x/y are coords
-        // prefer heatmap point (curveNumber 0)
-        const pt=data.points.find(p=>p.curveNumber===0) || data.points[0];
-        phi=pt.x; psi=pt.y;
-        // if pt is from marker (curveNumber 1), it will be current position – ignore, get heatmap x/y from event
-        if(pt.curveNumber!==0){
-          // try to get heatmap's x/y from the event's xaxis/yaxis
-          // fallback to using the underlying heatmap's x/y via pointNumber
-          // Plotly provides xaxis/yaxis range – we can compute from event position
-          // Instead, use data.event and convert
-          try{
-            const xaxis=plot._fullLayout.xaxis, yaxis=plot._fullLayout.yaxis;
-            const bb=plot.getBoundingClientRect();
-            const ex=data.event.clientX - bb.left, ey=data.event.clientY - bb.top;
-            // convert pixel to data via axis._offset etc – approximate using d2l
-            phi=xaxis.p2d(ex - xaxis._offset);
-            psi=yaxis.p2d(ey - yaxis._offset + yaxis._length); // flip?
-          }catch(e){}
-        }
-      }
-      if(typeof phi==='number' && typeof psi==='number'){
-        phi=Math.max(-180,Math.min(180,phi));
-        psi=Math.max(-180,Math.min(180,psi));
-        // also handle click on any trace – if we got marker position, we still animate to heatmap cell
-        // if phi/psi equals current, compute from click position instead
-        const cur=getPhiPsi();
-        if(Math.abs(phi-cur.phi)<0.1 && Math.abs(psi-cur.psi)<0.1){
-          // try alternative: use event's x/y via layout
-          try{
-            const xaxis=plot._fullLayout.xaxis, yaxis=plot._fullLayout.yaxis;
-            const rect=plot.getBoundingClientRect();
-            const ex=data.event.clientX - rect.left;
-            const ey=data.event.clientY - rect.top;
-            // use Plotly's internal conversion if available
-            if(xaxis && yaxis && xaxis.p2d){
-              phi=xaxis.p2d(ex - xaxis._offset);
-              psi=yaxis.p2d(yaxis._length - (ey - yaxis._offset));
-            }
-          }catch(e){}
-        }
-        moveToPhiPsi(phi,psi);
-      }
-    });
-    // also add a direct click handler on the plot div to capture clicks missed by plotly_click (e.g., on empty area)
-    plot.addEventListener('click',function(evt){
-      // if plotly_click already handled, this may double – but we check if animating then ignore
-      if(animating) return;
-      // Only handle if not already handled by plotly_click (we detect if points length 0)
-      // Use layout to convert pixel to data
+    // helper to convert pixel event to phi/psi using Plotly axis conversion (correct y flip)
+    function pixelToPhiPsi(evt){
       try{
         const xaxis=plot._fullLayout.xaxis, yaxis=plot._fullLayout.yaxis;
-        if(!xaxis || !yaxis) return;
+        if(!xaxis || !yaxis || !xaxis.p2d || !yaxis.p2d) return null;
         const rect=plot.getBoundingClientRect();
         const ex=evt.clientX - rect.left, ey=evt.clientY - rect.top;
-        // check if click is inside plot area
-        if(ex < xaxis._offset || ex > xaxis._offset + xaxis._length) return;
-        if(ey < yaxis._offset || ey > yaxis._offset + yaxis._length) return;
+        if(ex < xaxis._offset || ex > xaxis._offset + xaxis._length) return null;
+        if(ey < yaxis._offset || ey > yaxis._offset + yaxis._length) return null;
         const phi=xaxis.p2d(ex - xaxis._offset);
         const psi=yaxis.p2d(yaxis._length - (ey - yaxis._offset));
-        if(phi>= -180 && phi<=180 && psi>=-180 && psi<=180){
-          // debounce: if very close to current, still animate
-          // we need to ensure we don't duplicate the plotly_click handler's call – use a timeout flag
-          setTimeout(()=>{ if(!animating) moveToPhiPsi(phi,psi); }, 50);
+        if(phi<-180||phi>180||psi<-180||psi>180) return null;
+        return {phi,psi};
+      }catch(e){ return null; }
+    }
+    // single handler for plotly_click: use pixel conversion for continuous, accurate phi+psi
+    let lastClickTime=0;
+    plot.on('plotly_click',function(data){
+      // debounce duplicate with manual click
+      lastClickTime=Date.now();
+      const evt=data.event;
+      let coords=pixelToPhiPsi(evt);
+      // fallback to heatmap point if pixel conversion fails (e.g., p2d not ready)
+      if(!coords && data.points && data.points.length){
+        const pt=data.points.find(p=>p.curveNumber===0) || data.points[0];
+        if(pt && typeof pt.x==='number' && typeof pt.y==='number'){
+          coords={phi:pt.x, psi:pt.y};
         }
-      }catch(e){}
+      }
+      if(coords){
+        coords.phi=Math.max(-180,Math.min(180,coords.phi));
+        coords.psi=Math.max(-180,Math.min(180,coords.psi));
+        moveToPhiPsi(coords.phi, coords.psi);
+      }
+    });
+    // also handle clicks that don't trigger plotly_click (e.g., on empty margin) – but only if not recently handled
+    plot.addEventListener('click',function(evt){
+      if(animating) return;
+      if(Date.now()-lastClickTime < 400) return; // already handled by plotly_click
+      const coords=pixelToPhiPsi(evt);
+      if(coords){
+        moveToPhiPsi(coords.phi, coords.psi);
+      }
     });
   });
 }
@@ -701,31 +675,96 @@ function updatePlotMarker(phi,psi){
     Plotly.restyle('ramaplot',{x:[[-180,180]],y:[[psi,psi]]},[3]);
   }catch(e){}
 }
+// Single smooth gradual move: one continuous interpolation, not many macro steps
 function moveToPhiPsi(targetPhi,targetPsi){
   if(isNaN(targetPhi)||isNaN(targetPsi)) return;
   if(animating) return;
   const cur=getPhiPsi();
   if(isNaN(cur.phi)||isNaN(cur.psi)) return;
-  let dPhi=normalizeAngle(targetPhi-cur.phi), dPsi=normalizeAngle(targetPsi-cur.psi);
+  let dPhi=normalizeAngle(targetPhi-cur.phi);
+  let dPsi=normalizeAngle(targetPsi-cur.psi);
   const maxDelta=Math.max(Math.abs(dPhi),Math.abs(dPsi));
-  const steps=Math.max(1, Math.ceil(maxDelta/5)); // 5° per macro step
-  let i=0;
+  if(maxDelta < 0.2){ updateDihedralsDisplay(); return; }
+  // choose frames for smooth 60fps-like: ~1.5° per frame gives 15°=>10 frames, 180°=>120 frames capped
+  // request is single smooth move, so we do e.g., 30-50 frames total
+  const frames=Math.max(18, Math.min(55, Math.ceil(maxDelta/2.5)));
+  const dPhiStep=dPhi/frames;
+  const dPsiStep=dPsi/frames;
   animating=true;
+  let i=0;
   function step(){
-    if(i<steps){
-      const pf=dPhi/steps, ps=dPsi/steps;
-      rotateDirect('phi',pf,()=>{
-        rotateDirect('psi',ps,()=>{
-          updateDihedralsDisplay();
-          if(Math.abs(dPhi)>Math.abs(dPsi)) highlightPhiPsi('phi'); else highlightPhiPsi('psi');
-          i++;
-          setTimeout(step,50);
-          if(i>=steps){ animating=false; viewer.render(); }
-        });
+    if(i>=frames){
+      animating=false;
+      // final correction to exact target (avoid drift)
+      const cur2=getPhiPsi();
+      const remPhi=normalizeAngle(targetPhi-cur2.phi);
+      const remPsi=normalizeAngle(targetPsi-cur2.psi);
+      if(Math.abs(remPhi)>0.3 || Math.abs(remPsi)>0.3){
+        // one final small correction without rebuilding loop
+        if(Math.abs(remPhi)>0.3){
+          const N=findAtom(16,'N'), CA=findAtom(16,'CA');
+          if(N&&CA) rotateAtomsAboutAxis({x:N.x,y:N.y,z:N.z},{x:CA.x,y:CA.y,z:CA.z}, remPhi, isMovingAtomForPhi);
+        }
+        if(Math.abs(remPsi)>0.3){
+          const CA=findAtom(16,'CA'), C=findAtom(16,'C');
+          if(CA&&C) rotateAtomsAboutAxis({x:CA.x,y:CA.y,z:CA.z},{x:C.x,y:C.y,z:C.z}, remPsi, isMovingAtomForPsi);
+        }
+      }
+      updateDihedralsDisplay();
+      viewer.render();
+      if(showPlanes) updatePlanes();
+      if(showClashes) updateClashes();
+      return;
+    }
+    // rotate a little phi and a little psi in same frame – do both without intermediate highlight
+    // get fresh axes (they move slightly as we rotate)
+    const N=findAtom(16,'N'), CA=findAtom(16,'CA'), C=findAtom(16,'C');
+    // To keep single rebuild per frame, we do both rotations on atomsData before rebuilding
+    // So we temporarily disable rebuild inside rotateAtomsAboutAxis and do manual rebuild once
+    // Instead, we inline the rotation logic here for both
+    if(Math.abs(dPhiStep) > 0.001 && N && CA){
+      const axisA={x:N.x,y:N.y,z:N.z}, axisB={x:CA.x,y:CA.y,z:CA.z};
+      const ang=dPhiStep*Math.PI/180;
+      const u={x:axisB.x-axisA.x,y:axisB.y-axisA.y,z:axisB.z-axisA.z};
+      const un=normalize(u); const cosA=Math.cos(ang), sinA=Math.sin(ang);
+      atomsData.forEach(a=>{
+        if(!isMovingAtomForPhi(a)) return;
+        const p={x:a.x-axisA.x,y:a.y-axisA.y,z:a.z-axisA.z};
+        const dotu=dot(un,p), crossu=cross(un,p);
+        const rot={x:un.x*dotu*(1-cosA)+p.x*cosA+crossu.x*sinA, y:un.y*dotu*(1-cosA)+p.y*cosA+crossu.y*sinA, z:un.z*dotu*(1-cosA)+p.z*cosA+crossu.z*sinA};
+        a.x=rot.x+axisA.x; a.y=rot.y+axisA.y; a.z=rot.z+axisA.z;
       });
-    } else animating=false;
+    }
+    if(Math.abs(dPsiStep) > 0.001 && CA && C){
+      // need fresh CA,C after phi rotation (CA moved)
+      const CA2=findAtom(16,'CA'), C2=findAtom(16,'C');
+      if(CA2&&C2){
+        const axisA={x:CA2.x,y:CA2.y,z:CA2.z}, axisB={x:C2.x,y:C2.y,z:C2.z};
+        const ang=dPsiStep*Math.PI/180;
+        const u={x:axisB.x-axisA.x,y:axisB.y-axisA.y,z:axisB.z-axisA.z};
+        const un=normalize(u); const cosA=Math.cos(ang), sinA=Math.sin(ang);
+        atomsData.forEach(a=>{
+          if(!isMovingAtomForPsi(a)) return;
+          const p={x:a.x-axisA.x,y:a.y-axisA.y,z:a.z-axisA.z};
+          const dotu=dot(un,p), crossu=cross(un,p);
+          const rot={x:un.x*dotu*(1-cosA)+p.x*cosA+crossu.x*sinA, y:un.y*dotu*(1-cosA)+p.y*cosA+crossu.y*sinA, z:un.z*dotu*(1-cosA)+p.z*cosA+crossu.z*sinA};
+          a.x=rot.x+axisA.x; a.y=rot.y+axisA.y; a.z=rot.z+axisA.z;
+        });
+      }
+    }
+    // single rebuild per frame
+    rebuildModel(true);
+    // update marker smoothly
+    const curStep=getPhiPsi();
+    updatePlotMarker(curStep.phi, curStep.psi);
+    // highlight based on larger delta
+    if(i % 3 ===0){
+      if(Math.abs(dPhi) > Math.abs(dPsi)) highlightPhiPsi('phi'); else highlightPhiPsi('psi');
+    }
+    i++;
+    requestAnimationFrame(step);
   }
-  step();
+  requestAnimationFrame(step);
 }
 function normalizeAngle(a){ while(a>180) a-=360; while(a<-180) a+=360; return a; }
 
