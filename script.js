@@ -586,7 +586,6 @@ function doVDW(checked){
   const whiteBox=document.getElementById('divwhite');
   if(checked){
     if(whiteBox) whiteBox.style.display='';
-    // Overlay translucent VdW spheres without hiding ball-and-stick (original keeps both models)
     vdwShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
     vdwShapes=[];
     const radii={H:1.20, C:1.70, N:1.55, O:1.52};
@@ -601,6 +600,7 @@ function doVDW(checked){
       const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:0.38});
       vdwShapes.push(s);
     });
+    if(showClashes) updateClashes();
     viewer.render();
   } else {
     if(whiteBox){ whiteBox.style.display='none'; document.getElementById('idwhite').checked=false; }
