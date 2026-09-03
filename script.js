@@ -687,69 +687,98 @@ function makeClashPair(a,b, overlaps){
   const ra=radii[a.elem]||1.5, rb=radii[b.elem]||1.5;
   const sum=(ra+rb)*scale;
   if(d < sum && d > 0.01){
-    // Lens = intersection of the two VdW spheres (exact geometry of overlap)
-    // Center of the intersection circle lies on the axis a->b at distance t from a
     const raa=ra*scale, rbb=rb*scale;
-    // For two spheres distance d apart, the plane of intersection is at
-    // t = (raa^2 - rbb^2 + d^2)/(2d) from center a
+    // Intersection circle of the two VdW spheres: distance t from center a
     const t=(raa*raa - rbb*rbb + d*d)/(2*d);
-    if(t < 0 || t > d) return; // spheres fully inside each other – skip (not a lens)
-    const cx=a.x+(b.x-a.x)*t/d, cy=a.y+(b.y-a.y)*t/d, cz=a.z+(b.z-a.z)*t/d;
-    // radius of the lens (intersection circle)
+    if(t < 0 || t > d) return; // fully contained – no lens
     const lensR=Math.sqrt(Math.max(0, raa*raa - t*t));
     if(!isFinite(lensR) || lensR<=0.01) return;
-    // unit vector along axis a->b
+    // axis unit u from a to b, plus perpendicular basis v,w
     const ux=(b.x-a.x)/d, uy=(b.y-a.y)/d, uz=(b.z-a.z)/d;
-    // build a circle of points in the plane perpendicular to axis
-    // find two perpendicular basis vectors
-    let px,py,pz;
-    if(Math.abs(ux) < 0.9){
-      px=uy*0 - uz*0; // we'll construct properly below
-    }
-    // orthonormal basis: pick any vector not parallel to u
     let vx,vy,vz;
     if(Math.abs(ux) < 0.9){ vx=1; vy=0; vz=0; }
     else { vx=0; vy=1; vz=0; }
-    // v -= (v·u)u
     const dotvu=vx*ux+vy*uy+vz*uz;
     vx-=dotvu*ux; vy-=dotvu*uy; vz-=dotvu*uz;
     const vl=Math.hypot(vx,vy,vz)||1;
     vx/=vl; vy/=vl; vz/=vl;
-    // w = u × v
     const wx=uy*vz-uz*vy, wy=uz*vx-ux*vz, wz=ux*vy-uy*vx;
-    // build lens as flat disc of triangles (a fan of ~18 triangles)
-    const segs=18;
-    const verts=[];
-    const normals=[];
-    const colors=[];
-    for(let i=0;i<=segs;i++){
-      const ang=i/segs*Math.PI*2;
-      const cosA=Math.cos(ang), sinA=Math.sin(ang);
-      const rx=cx + lensR*(vx*cosA + wx*sinA);
-      const ry=cy + lensR*(vy*cosA + wy*sinA);
-      const rz=cz + lensR*(vz*cosA + wz*sinA);
-      verts.push(new $3Dmol.Vector3(rx,ry,rz));
-      normals.push(new $3Dmol.Vector3(ux,uy,uz));
-      colors.push({r:1.0, g:0.6, b:0.0});
-    }
-    // center vertex
-    verts.push(new $3Dmol.Vector3(cx,cy,cz));
+
+    const segs=18, rings=5;
+    const verts=[], normals=[], colors=[], faces=[];
+    // ---------- Cap of sphere a (points on A's surface inside B) ----------
+    const thMaxA=Math.acos(Math.min(1, Math.max(-1, t/raa)));
+    const ringA=[];
+    // pole (point on A along +u)
+    verts.push(new $3Dmol.Vector3(a.x+raa*ux, a.y+raa*uy, a.z+raa*uz));
     normals.push(new $3Dmol.Vector3(ux,uy,uz));
-    colors.push({r:1.0, g:0.6, b:0.0});
-    const faces=[];
-    for(let i=0;i<segs;i++){
-      faces.push(i, segs, (i+1)%segs);
+    colors.push({r:1.0,g:0.55,b:0.0});
+    const poleA=verts.length-1;
+    for(let k=1;k<=rings;k++){
+      const th=thMaxA*k/rings, st=Math.sin(th), ct=Math.cos(th);
+      const ring=[];
+      for(let i=0;i<segs;i++){
+        const ph=i/segs*2*Math.PI, cp=Math.cos(ph), sp=Math.sin(ph);
+        const lx=st*cp, ly=st*sp;
+        const rdx=lx*vx+ly*wx+ct*ux, rdy=lx*vy+ly*wy+ct*uy, rdz=lx*vz+ly*wz+ct*uz;
+        verts.push(new $3Dmol.Vector3(a.x+raa*rdx, a.y+raa*rdy, a.z+raa*rdz));
+        normals.push(new $3Dmol.Vector3(rdx,rdy,rdz));
+        colors.push({r:1.0,g:0.55,b:0.0});
+        ring.push(verts.length-1);
+      }
+      ringA.push(ring);
     }
-    const spec={vertexArr:verts, normalArr:normals, faceArr:faces, color:colors, opacity:0.6};
+    for(let i=0;i<segs;i++){
+      faces.push(poleA, ringA[0][(i+1)%segs], ringA[0][i]);
+    }
+    for(let k=0;k<rings-1;k++){
+      for(let i=0;i<segs;i++){
+        const i2=(i+1)%segs;
+        faces.push(ringA[k][i], ringA[k][i2], ringA[k+1][i2]);
+        faces.push(ringA[k][i], ringA[k+1][i2], ringA[k+1][i]);
+      }
+    }
+    // ---------- Cap of sphere b (points on B's surface inside A) ----------
+    const thMaxB=Math.acos(Math.min(1, Math.max(-1, (d-t)/rbb)));
+    const ringB=[];
+    verts.push(new $3Dmol.Vector3(b.x-rbb*ux, b.y-rbb*uy, b.z-rbb*uz));
+    normals.push(new $3Dmol.Vector3(-ux,-uy,-uz));
+    colors.push({r:1.0,g:0.55,b:0.0});
+    const poleB=verts.length-1;
+    for(let k=1;k<=rings;k++){
+      const th=thMaxB*k/rings, st=Math.sin(th), ct=Math.cos(th);
+      const ring=[];
+      for(let i=0;i<segs;i++){
+        const ph=i/segs*2*Math.PI, cp=Math.cos(ph), sp=Math.sin(ph);
+        const lx=st*cp, ly=st*sp;
+        const rdx=lx*vx+ly*wx-ct*ux, rdy=lx*vy+ly*wy-ct*uy, rdz=lx*vz+ly*wz-ct*uz;
+        verts.push(new $3Dmol.Vector3(b.x+rbb*rdx, b.y+rbb*rdy, b.z+rbb*rdz));
+        normals.push(new $3Dmol.Vector3(rdx,rdy,rdz));
+        colors.push({r:1.0,g:0.55,b:0.0});
+        ring.push(verts.length-1);
+      }
+      ringB.push(ring);
+    }
+    for(let i=0;i<segs;i++){
+      faces.push(poleB, ringB[0][(i+1)%segs], ringB[0][i]);
+    }
+    for(let k=0;k<rings-1;k++){
+      for(let i=0;i<segs;i++){
+        const i2=(i+1)%segs;
+        faces.push(ringB[k][i], ringB[k][i2], ringB[k+1][i2]);
+        faces.push(ringB[k][i], ringB[k+1][i2], ringB[k+1][i]);
+      }
+    }
+    // Both caps share the same rim (intersection circle), closing the lens volume.
+    const spec={vertexArr:verts, normalArr:normals, faceArr:faces, color:colors, opacity:0.6, side:2};
     try{
       const shape=viewer.addCustom(spec);
-      // set opacity on the shape material (3Dmol custom shapes support spec.opacity)
       if(shape && shape.setColor){
-        try{ shape.setColor(0xffaa00, 0.6); }catch(e){}
+        try{ shape.setColor(0xffa500, 0.6); }catch(e){}
       }
       clashShapes.push(shape);
     }catch(e){
-      const s=viewer.addSphere({center:{x:cx,y:cy,z:cz}, radius:lensR*0.75, color:'orange', opacity:0.6});
+      const s=viewer.addSphere({center:{x:a.x+(b.x-a.x)*t/d, y:a.y+(b.y-a.y)*t/d, z:a.z+(b.z-a.z)*t/d}, radius:lensR*0.8, color:'orange', opacity:0.6});
       clashShapes.push(s);
     }
   }
