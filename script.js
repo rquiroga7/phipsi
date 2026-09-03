@@ -67,8 +67,25 @@ function generatePDB(atoms){
   return out;
 }
 function syncModelPositions(){
-  // Use full rebuild to ensure ball-and-stick updates correctly (direct copy was not refreshing WebGL buffers)
-  rebuildModel(true);
+  if(!model) return;
+  const m = viewer.getModel(0) || model;
+  const mAtoms = m.atoms;
+  if(mAtoms){
+    for(let i=0;i<atomsData.length && i<mAtoms.length;i++){
+      mAtoms[i].x=atomsData[i].x;
+      mAtoms[i].y=atomsData[i].y;
+      mAtoms[i].z=atomsData[i].z;
+    }
+  }
+  if(m.frames && m.frames[0]){
+    const f=m.frames[0];
+    for(let i=0;i<atomsData.length && i<f.length;i++){
+      f[i].x=atomsData[i].x;
+      f[i].y=atomsData[i].y;
+      f[i].z=atomsData[i].z;
+    }
+  }
+  viewer.render();
 }
 function rebuildModel(preserveView){
   let view=null;
