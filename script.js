@@ -202,7 +202,7 @@ function applyOriginalStyle(){
   viewer.addStyle({atom:'CA'}, {sphere:{color:'#000000'}}); // Calpha black as requested (original key #383838, now pure black)
   viewer.addStyle({elem:'N'}, {sphere:{color:'#3050ff'}});
   viewer.addStyle({elem:'O'}, {sphere:{color:'#ff2020'}});
-  viewer.addStyle({elem:'H'}, {sphere:{color:'white', scale:0.20}});
+  viewer.addStyle({elem:'H'}, {sphere:{color:'white', scale:0.28}});
   viewer.addStyle({}, {stick:{color:'white', radius:0.12}});
   viewer.render();
   // add dotted partial double bonds for peptide and carbonyl (always visible, like original)
@@ -679,8 +679,24 @@ function updateClashes(){
     clashShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
     clashShapes=[];
   }
-  // Show only the overlapping VdW volume as small red spheres at mid, not recoloring entire VdW
-  // Keep VdW spheres as they are (element colors, low alpha)
+  // Lens-only: ensure VdW spheres are visible for context (auto-show if needed)
+  let vdwWasAutoShown=false;
+  if(vdwShapes.length===0){
+    // Show VdW with low alpha for clash context even if checkbox off
+    const radii={H:1.20, C:1.70, N:1.55, O:1.52};
+    const isWhite=document.getElementById('idwhite')?.checked;
+    atomsData.forEach(a=>{
+      const ra=radii[a.elem]||1.5;
+      let col=isWhite?'white':(a.atom==='CA'?'#000000':a.elem==='N'?'#3050ff':a.elem==='O'?'#ff2020':a.elem==='H'?'white':'#c8c8c8');
+      const op=isWhite?0.22:0.30;
+      const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:op});
+      vdwShapes.push(s);
+    });
+    vdwWasAutoShown=true;
+    // mark that VdW was auto-shown for clash, so we can clean it up when clashes off and VdW checkbox is off
+    window._vdwAutoForClash = true;
+  }
+  // Create small red lenses at exact overlap volumes only
   const sidechain=['CB','1HB','2HB','3HB'].map(n=>findAtom(16,n)).filter(Boolean);
   const ca1=[findAtom(15,'O'),findAtom(16,'H'),findAtom(16,'O'),findAtom(17,'H')].filter(Boolean);
   sidechain.forEach(sc=> ca1.forEach(c=> makeClashPair(sc,c)));
@@ -706,6 +722,12 @@ function doClashes(checked){
   } else {
     clashShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
     clashShapes=[];
+    // if VdW was auto-shown for clash and VdW checkbox is still off, remove those VdW
+    if(window._vdwAutoForClash && !showVDW){
+      vdwShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
+      vdwShapes=[];
+      window._vdwAutoForClash=false;
+    }
     if(trailDiv){ trailDiv.style.display='none'; document.getElementById('idtrailclashes').checked=false; trailClashes=false; }
     viewer.render();
   }
