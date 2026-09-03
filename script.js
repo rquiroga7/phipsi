@@ -67,20 +67,22 @@ function generatePDB(atoms){
   return out;
 }
 function syncModelPositions(){
-  // copy atomsData coords into the live 3Dmol model without clearing viewer (keeps shapes)
-  if(!model || !model.atoms){
-    // fallback to rebuild if model not ready
-    rebuildModel(true);
-    return;
-  }
-  const mAtoms=model.atoms;
-  // mAtoms order should match atomsData order (both from same PDB)
-  for(let i=0;i<atomsData.length && i<mAtoms.length;i++){
-    mAtoms[i].x=atomsData[i].x;
-    mAtoms[i].y=atomsData[i].y;
-    mAtoms[i].z=atomsData[i].z;
-  }
-  // also update any cached atoms in viewer
+  if(!model) return;
+  // Try direct atom copy first, then also use setCoordinates for GLModel internal frames
+  try{
+    const mAtoms=model.atoms || viewer.getModel(0)?.atoms;
+    if(mAtoms){
+      for(let i=0;i<atomsData.length && i<mAtoms.length;i++){
+        mAtoms[i].x=atomsData[i].x;
+        mAtoms[i].y=atomsData[i].y;
+        mAtoms[i].z=atomsData[i].z;
+      }
+    }
+    // also update via setCoordinates to ensure WebGL buffers refresh (3Dmol caches)
+    if(model.setCoordinates){
+      try{ model.setCoordinates(generatePDB(atomsData),'pdb'); }catch(e){}
+    }
+  }catch(e){}
   viewer.render();
 }
 function rebuildModel(preserveView){
@@ -198,26 +200,31 @@ function applyOriginalStyle(){
   updateDoubleBonds();
 }
 function updateDoubleBonds(){
-  // clear previous
   doubleBondShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
   doubleBondShapes=[];
   const pairs=[
-    [findAtom(15,'C'), findAtom(16,'N'), 'peptide'],
-    [findAtom(16,'C'), findAtom(17,'N'), 'peptide'],
-    [findAtom(15,'C'), findAtom(15,'O'), 'carbonyl'],
-    [findAtom(16,'C'), findAtom(16,'O'), 'carbonyl']
+    [findAtom(15,'C'), findAtom(16,'N')],
+    [findAtom(16,'C'), findAtom(17,'N')],
+    [findAtom(15,'C'), findAtom(15,'O')],
+    [findAtom(16,'C'), findAtom(16,'O')]
   ];
   pairs.forEach(pair=>{
     const a=pair[0], b=pair[1];
     if(!a||!b) return;
-    // add solid stick is already via setStyle, now add a second offset dashed line to mimic partial double
-    // Use addLine with dashed:true, semi-transparent white
-    const mid={x:(a.x+b.x)/2, y:(a.y+b.y)/2, z:(a.z+b.z)/2};
-    // create a dashed line slightly offset – we do a single dashed line over the same positions but dashed
-    // 3Dmol dashed lines are rendered as cylinder segments
-    const s=viewer.addLine({start:{x:a.x,y:a.y,z:a.z}, end:{x:b.x,y:b.y,z:b.z}, dashed:true, dashLength:0.12, gapLength:0.12, color:'white', linewidth:2});
+    // original Jmol: set multiplebondspacing 0.15, partialdouble -> one solid + one dotted parallel offset by 0.15
+    // we add a dashed line offset perpendicular to bond by 0.15
+    const mx=(a.x+b.x)/2, my=(a.y+b.y)/2, mz=(a.z+b.z)/2;
+    const bx=b.x-a.x, by=b.y-a.y, bz=b.z-a.z;
+    // find perpendicular: cross bond with arbitrary up
+    let ux=0, uy=0, uz=1;
+    // if bond is near vertical, use other up
+    if(Math.abs(bz) > 0.9*Math.hypot(bx,by,bz)){ ux=1; uy=0; uz=0; }
+    let px=by*uz - bz*uy, py=bz*ux - bx*uz, pz=bx*uy - by*ux;
+    const plen=Math.hypot(px,py,pz)||1;
+    px=px/plen*0.15; py=py/plen*0.15; pz=pz/plen*0.15;
+    const a2={x:a.x+px, y:a.y+py, z:a.z+pz}, b2={x:b.x+px, y:b.y+py, z:b.z+pz};
+    const s=viewer.addLine({start:a2, end:b2, dashed:true, dashLength:0.10, gapLength:0.10, color:'white', linewidth:2});
     doubleBondShapes.push(s);
-    // for peptide bonds, also add a faint magenta overlay when Peptide Bonds checkbox is off? Keep white dotted as in original
   });
   viewer.render();
 }
@@ -347,9 +354,8 @@ function rotateAtomsAboutAxis(axisA, axisB, angleDeg, predicate){
   if(showPeptideBondsFlag){
     doPeptideBonds(true);
   }
-  // keep VdW overlay if visible
+  // keep VdW overlay if visible (update to new atom positions)
   if(showVDW){
-    // update VdW spheres to new positions
     vdwShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
     vdwShapes=[];
     const radii={H:1.20, C:1.70, N:1.55, O:1.52};
@@ -369,17 +375,35 @@ function rotateAtomsAboutAxis(axisA, axisB, angleDeg, predicate){
       vdwShapes.push(s);
     });
   }
+  // keep Alanine black dots if visible
+  if(alanineShapes.length>0){
+    alanineShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
+    alanineShapes=[];
+    const alaAtoms=atomsData.filter(a=>a.resi===16);
+    alaAtoms.forEach(a=>{
+      const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:0.9, color:'black', opacity:0.18});
+      alanineShapes.push(s);
+    });
+  }
+  // keep clashes if visible (update to new positions)
+  if(showClashes){
+    // use makeClashPair logic – clear and re-add at new positions
+    // we call updateClashes which handles trail
+    // but to avoid double-clear, we just call it (it will clear if not trail)
+    // we need to avoid infinite loop: updateClashes will clear and re-add
+    // so we just call it
+    updateClashes();
+  }
 }
 
 function isMovingAtomForPhi(atom){
-  // phi N-CA: per alanine dipeptide spec, rotating phi moves CH3 (CB), CA and C' (C,O) together against NH
-  // so moving set is C-terminal: Ala CA/C/O/CB/HA + downstream Arg
-  if(atom.resi===15) return false;
+  // phi N-CA: rotate N-terminal peptide (hPlane blue: 15.CA/15.O/16.H) so phi moves Lys + H, psi moves C-terminal (sPlane orange)
+  // This makes phi->blue, psi->orange distinct as per original Jmol (phi hPlane, psi sPlane)
+  if(atom.resi===15) return true;
   if(atom.resi===16){
-    if(atom.name==='N' || atom.name==='H') return false;
-    return true;
+    if(atom.name==='H') return true;
+    return false;
   }
-  if(atom.resi===17) return true;
   return false;
 }
 function isMovingAtomForPsi(atom){
@@ -413,7 +437,8 @@ function adjustDihedral(type,deltaDeg){
   let axisA, axisB, predicate;
   let isTri=!!(N&&CA&&C);
   if(isTri){
-    if(type==='phi'){ axisA={x:N.x,y:N.y,z:N.z}; axisB={x:CA.x,y:CA.y,z:CA.z}; predicate=isMovingAtomForPhi; highlightPhiPsi('phi'); }
+    // phi upstream needs inverted sign to get +15 phi
+    if(type==='phi'){ axisA={x:N.x,y:N.y,z:N.z}; axisB={x:CA.x,y:CA.y,z:CA.z}; predicate=isMovingAtomForPhi; highlightPhiPsi('phi'); deltaDeg=-deltaDeg; }
     else { axisA={x:CA.x,y:CA.y,z:CA.z}; axisB={x:C.x,y:C.y,z:C.z}; predicate=isMovingAtomForPsi; highlightPhiPsi('psi'); }
     animating=true;
     animateRotation(axisA,axisB,deltaDeg,predicate,()=>{
@@ -452,7 +477,7 @@ function rotateDirect(type,deltaDeg,cb){
   let isTri=!!(N&&CA&&C);
   let axisA,axisB,predicate;
   if(isTri){
-    if(type==='phi'){ axisA={x:N.x,y:N.y,z:N.z}; axisB={x:CA.x,y:CA.y,z:CA.z}; predicate=isMovingAtomForPhi; }
+    if(type==='phi'){ axisA={x:N.x,y:N.y,z:N.z}; axisB={x:CA.x,y:CA.y,z:CA.z}; predicate=isMovingAtomForPhi; deltaDeg=-deltaDeg; }
     else { axisA={x:CA.x,y:CA.y,z:CA.z}; axisB={x:C.x,y:C.y,z:C.z}; predicate=isMovingAtomForPsi; }
     animateRotation(axisA,axisB,deltaDeg,predicate,cb);
   } else {
@@ -837,7 +862,7 @@ function moveToPhiPsi(targetPhi,targetPsi){
       if(Math.abs(remPhi)>0.3 || Math.abs(remPsi)>0.3){
         if(Math.abs(remPhi)>0.3){
           const N=findAtom(16,'N'), CA=findAtom(16,'CA');
-          if(N&&CA) rotateAtomsAboutAxis({x:N.x,y:N.y,z:N.z},{x:CA.x,y:CA.y,z:CA.z}, remPhi, isMovingAtomForPhi);
+          if(N&&CA) rotateAtomsAboutAxis({x:N.x,y:N.y,z:N.z},{x:CA.x,y:CA.y,z:CA.z}, -remPhi, isMovingAtomForPhi);
         }
         if(Math.abs(remPsi)>0.3){
           const CA=findAtom(16,'CA'), C=findAtom(16,'C');
@@ -854,7 +879,7 @@ function moveToPhiPsi(targetPhi,targetPsi){
     const N=findAtom(16,'N'), CA=findAtom(16,'CA'), C=findAtom(16,'C');
     if(Math.abs(dPhiStep) > 0.001 && N && CA){
       const axisA={x:N.x,y:N.y,z:N.z}, axisB={x:CA.x,y:CA.y,z:CA.z};
-      const ang=dPhiStep*Math.PI/180;
+      const ang=-dPhiStep*Math.PI/180; // invert for upstream phi (N-terminal)
       const u={x:axisB.x-axisA.x,y:axisB.y-axisA.y,z:axisB.z-axisA.z};
       const un=normalize(u); const cosA=Math.cos(ang), sinA=Math.sin(ang);
       atomsData.forEach(a=>{
@@ -905,6 +930,19 @@ function moveToPhiPsi(targetPhi,targetPsi){
         const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:op});
         vdwShapes.push(s);
       });
+    }
+    if(alanineShapes.length>0){
+      alanineShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
+      alanineShapes=[];
+      const alaAtoms=atomsData.filter(a=>a.resi===16);
+      alaAtoms.forEach(a=>{
+        const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:0.9, color:'black', opacity:0.18});
+        alanineShapes.push(s);
+      });
+    }
+    if(showClashes){
+      // update clashes to new positions (keep trail if enabled)
+      updateClashes();
     }
     // update marker smoothly
     const curStep=getPhiPsi();
