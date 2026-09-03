@@ -664,13 +664,73 @@ function makeClashPair(a,b, overlaps){
   }
   const ra=radii[a.elem]||1.5, rb=radii[b.elem]||1.5;
   const sum=(ra+rb)*scale;
-  if(d < sum){
-    const overlap=sum-d;
-    // small orange lens at overlap - only the overlapping volume, high opacity
-    const mid={x:(a.x+b.x)/2, y:(a.y+b.y)/2, z:(a.z+b.z)/2};
-    const r=Math.min(0.60, 0.20 + overlap*0.50);
-    const s=viewer.addSphere({center:mid, radius:r, color:'orange', opacity:0.96});
-    clashShapes.push(s);
+  if(d < sum && d > 0.01){
+    // Lens = intersection of the two VdW spheres (exact geometry of overlap)
+    // Center of the intersection circle lies on the axis a->b at distance t from a
+    const raa=ra*scale, rbb=rb*scale;
+    // For two spheres distance d apart, the plane of intersection is at
+    // t = (raa^2 - rbb^2 + d^2)/(2d) from center a
+    const t=(raa*raa - rbb*rbb + d*d)/(2*d);
+    if(t < 0 || t > d) return; // spheres fully inside each other – skip (not a lens)
+    const cx=a.x+(b.x-a.x)*t/d, cy=a.y+(b.y-a.y)*t/d, cz=a.z+(b.z-a.z)*t/d;
+    // radius of the lens (intersection circle)
+    const lensR=Math.sqrt(Math.max(0, raa*raa - t*t));
+    if(!isFinite(lensR) || lensR<=0.01) return;
+    // unit vector along axis a->b
+    const ux=(b.x-a.x)/d, uy=(b.y-a.y)/d, uz=(b.z-a.z)/d;
+    // build a circle of points in the plane perpendicular to axis
+    // find two perpendicular basis vectors
+    let px,py,pz;
+    if(Math.abs(ux) < 0.9){
+      px=uy*0 - uz*0; // we'll construct properly below
+    }
+    // orthonormal basis: pick any vector not parallel to u
+    let vx,vy,vz;
+    if(Math.abs(ux) < 0.9){ vx=1; vy=0; vz=0; }
+    else { vx=0; vy=1; vz=0; }
+    // v -= (v·u)u
+    const dotvu=vx*ux+vy*uy+vz*uz;
+    vx-=dotvu*ux; vy-=dotvu*uy; vz-=dotvu*uz;
+    const vl=Math.hypot(vx,vy,vz)||1;
+    vx/=vl; vy/=vl; vz/=vl;
+    // w = u × v
+    const wx=uy*vz-uz*vy, wy=uz*vx-ux*vz, wz=ux*vy-uy*vx;
+    // build lens as flat disc of triangles (a fan of ~18 triangles)
+    const segs=18;
+    const verts=[];
+    const normals=[];
+    for(let i=0;i<=segs;i++){
+      const ang=i/segs*Math.PI*2;
+      const cosA=Math.cos(ang), sinA=Math.sin(ang);
+      const rx=cx + lensR*(vx*cosA + wx*sinA);
+      const ry=cy + lensR*(vy*cosA + wy*sinA);
+      const rz=cz + lensR*(vz*cosA + wz*sinA);
+      verts.push(new $3Dmol.Vector3(rx,ry,rz));
+      normals.push(new $3Dmol.Vector3(ux,uy,uz));
+    }
+    // center vertex
+    verts.push(new $3Dmol.Vector3(cx,cy,cz));
+    normals.push(new $3Dmol.Vector3(ux,uy,uz));
+    const faces=[];
+    for(let i=0;i<segs;i++){
+      faces.push(i, segs, (i+1)%segs);
+    }
+    // 3Dmol addCustom requires color per vertex or single color
+    const colorArr=[];
+    for(let i=0;i<=segs;i++) colorArr.push({r:1.0, g:0.6, b:0.0});
+    colorArr.push({r:1.0, g:0.6, b:0.0});
+    // use addCustom with vertices/normals/faces; color as single color via spec.color
+    const spec={vertexArr:verts, normalArr:normals, faceArr:faces};
+    try{
+      // 3Dmol addCustom accepts color:{r,g,b} for whole shape (and optional color array)
+      spec.color={r:1.0, g:0.6, b:0.0};
+      const shape=viewer.addCustom(spec);
+      clashShapes.push(shape);
+    }catch(e){
+      // fallback to small sphere
+      const s=viewer.addSphere({center:{x:cx,y:cy,z:cz}, radius:lensR*0.7, color:'orange', opacity:0.96});
+      clashShapes.push(s);
+    }
   }
 }
 function updateClashes(){
