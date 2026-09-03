@@ -397,7 +397,7 @@ function rotateAtomsAboutAxis(axisA, axisB, angleDeg, predicate){
         else if(a.elem==='H') col='white';
       }
       const op=isWhite?0.28:0.38;
-      const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:op});
+      const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:showClashes? (isWhite?0.16:0.22) : op});
       vdwShapes.push(s);
     });
     // if clashes also on, recolor after
@@ -770,15 +770,23 @@ function makeClashPair(a,b, overlaps){
       }
     }
     // Both caps share the same rim (intersection circle), closing the lens volume.
-    const spec={vertexArr:verts, normalArr:normals, faceArr:faces, color:colors, opacity:0.6, side:2};
+    const spec={vertexArr:verts, normalArr:normals, faceArr:faces, color:colors, opacity:0.6};
     try{
       const shape=viewer.addCustom(spec);
       if(shape && shape.setColor){
-        try{ shape.setColor(0xffa500, 0.6); }catch(e){}
+        try{ shape.setColor(0xffa500, 0.85); }catch(e){}
+      }
+      // Double-sided so both caps render orange (no dark culled side)
+      if(shape && shape.material){
+        try{
+          shape.material.side = 2; // THREE.DoubleSide
+          shape.material.needsUpdate = true;
+          shape.material.depthWrite = false;
+        }catch(e){}
       }
       clashShapes.push(shape);
     }catch(e){
-      const s=viewer.addSphere({center:{x:a.x+(b.x-a.x)*t/d, y:a.y+(b.y-a.y)*t/d, z:a.z+(b.z-a.z)*t/d}, radius:lensR*0.8, color:'orange', opacity:0.6});
+      const s=viewer.addSphere({center:{x:a.x+(b.x-a.x)*t/d, y:a.y+(b.y-a.y)*t/d, z:a.z+(b.z-a.z)*t/d}, radius:lensR*0.8, color:'orange', opacity:0.85});
       clashShapes.push(s);
     }
   }
@@ -1023,7 +1031,7 @@ function moveToPhiPsi(targetPhi,targetPsi){
         const ra=radii[a.elem]||1.5;
         let col=isWhite?'white':(a.atom==='CA'?'#000000':a.elem==='N'?'#3050ff':a.elem==='O'?'#ff2020':a.elem==='H'?'white':'#c8c8c8');
         const op=isWhite?0.28:0.38;
-        const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:op});
+        const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:showClashes?(isWhite?0.16:0.22):op});
         vdwShapes.push(s);
       });
       if(showClashes) updateClashes();
