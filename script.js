@@ -67,7 +67,6 @@ function generatePDB(atoms){
   return out;
 }
 function syncModelPositions(){
-  // Fast path: update atoms in-place (no viewer.clear / rebuild) - keeps all shapes
   if(!model) return;
   try{
     const m = viewer.getModel(0) || model;
@@ -88,7 +87,10 @@ function syncModelPositions(){
       }
     }
   }catch(e){}
-  viewer.render();
+  // 3Dmol caches WebGL geometry built at setStyle time, so re-applying the style
+  // (without viewer.clear) regenerates ball-and-stick from the updated coords.
+  // This is much cheaper than rebuildModel and keeps all extra shapes.
+  applyOriginalStyle();
 }
 function rebuildModel(preserveView){
   let view=null;
