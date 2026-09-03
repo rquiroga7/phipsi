@@ -86,11 +86,12 @@ function rebuildModel(preserveView){
   if(window._highlightShapes) window._highlightShapes=[];
   if(window._customPlanes) window._customPlanes=[];
   const pdbText=generatePDB(atomsData);
-  model=viewer.addModel(pdbText,'pdb');
-  applyOriginalStyle(); // adds doubleBondShapes
+  model=viewer.addModel(pdbText,'pdb', {keepH:true});
+  applyOriginalStyle();
   if(view) try{ viewer.setView(view); }catch(e){ viewer.zoomTo(); }
   else viewer.zoomTo();
   viewer.render();
+  // re-add persistent shapes that were visible before
   if(hadAlanine) doAlanine(true);
   if(hadPep) doPeptideBonds(true);
   if(hadPlanes) updatePlanes();
@@ -141,7 +142,7 @@ function loadTripeptide(){
     if(atomsData.length===0) throw new Error('empty parse');
     viewer.clear();
     planeShapes=[]; clashShapes=[]; alanineShapes=[];
-    model=viewer.addModel(generatePDB(atomsData),'pdb');
+    model=viewer.addModel(generatePDB(atomsData),'pdb', {keepH:true});
     applyOriginalStyle();
     viewer.zoomTo();
     // apply initial view similar to original: rotate z -108, y 138, z -85
@@ -162,7 +163,7 @@ function loadTripeptide(){
     atomsData=parsePDB(PDB_FALLBACK);
     viewer.clear();
     planeShapes=[]; clashShapes=[]; alanineShapes=[];
-    model=viewer.addModel(generatePDB(atomsData),'pdb');
+    model=viewer.addModel(generatePDB(atomsData),'pdb', {keepH:true});
     applyOriginalStyle();
     viewer.zoomTo();
     try{
@@ -185,7 +186,7 @@ function loadPDB(pdbId='1CRN'){
     atomsData=parsePDB(txt);
     viewer.clear();
     planeShapes=[]; clashShapes=[]; alanineShapes=[];
-    model=viewer.addModel(generatePDB(atomsData),'pdb');
+    model=viewer.addModel(generatePDB(atomsData),'pdb', {keepH:true});
     viewer.setStyle({}, {cartoon:{color:'spectrum'}});
     viewer.zoomTo();
     viewer.render();
@@ -196,18 +197,18 @@ function loadPDB(pdbId='1CRN'){
 
 function applyOriginalStyle(){
   // base ball-and-stick: stick radius ~0.12, sphere scale 0.30, white bonds
-  viewer.setStyle({}, {stick:{radius:0.12, color:'white'}, sphere:{scale:0.30, colorscheme:'whiteCarbon'}});
+  viewer.setStyle({}, {stick:{radius:0.12, color:'white'}, sphere:{scale:0.30}});
   // now override colors via addStyle to keep scale
   viewer.addStyle({elem:'C'}, {sphere:{color:'#c8c8c8', scale:0.30}});
   viewer.addStyle({atom:'CA'}, {sphere:{color:'#505050', scale:0.32}}); // Calpha darker gray #505050 than other C #c8c8c8
   viewer.addStyle({elem:'N'}, {sphere:{color:'#3050ff'}});
   viewer.addStyle({elem:'O'}, {sphere:{color:'#ff2020'}});
-  viewer.setStyle({elem:'H'}, {sphere:{color:'white', scale:0.60, hidden:false}, stick:{color:'white', radius:0.15, hidden:false}});
-  viewer.addStyle({atom:'H'}, {sphere:{color:'white', scale:0.60, hidden:false}});
-  viewer.addStyle({atom:'HA'}, {sphere:{color:'white', scale:0.60, hidden:false}});
-  viewer.addStyle({atom:'1HB'}, {sphere:{color:'white', scale:0.60, hidden:false}});
-  viewer.addStyle({atom:'2HB'}, {sphere:{color:'white', scale:0.60, hidden:false}});
-  viewer.addStyle({atom:'3HB'}, {sphere:{color:'white', scale:0.60, hidden:false}});
+  viewer.setStyle({elem:'H'}, {sphere:{color:'#ffffff', scale:0.80, hidden:false}, stick:{color:'white', radius:0.15, hidden:false}});
+  viewer.addStyle({atom:'H'}, {sphere:{color:'#ffffff', scale:0.80, hidden:false}});
+  viewer.addStyle({atom:'HA'}, {sphere:{color:'#ffffff', scale:0.80, hidden:false}});
+  viewer.addStyle({atom:'1HB'}, {sphere:{color:'#ffffff', scale:0.80, hidden:false}});
+  viewer.addStyle({atom:'2HB'}, {sphere:{color:'#ffffff', scale:0.80, hidden:false}});
+  viewer.addStyle({atom:'3HB'}, {sphere:{color:'#ffffff', scale:0.80, hidden:false}});
   viewer.addStyle({}, {stick:{color:'white', radius:0.12, hidden:false}});
   viewer.render();
   // add dotted partial double bonds for peptide and carbonyl (always visible, like original)
