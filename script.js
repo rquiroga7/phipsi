@@ -742,7 +742,7 @@ function drawRamaHeat(){
         if(ex < xaxis._offset || ex > xaxis._offset + xaxis._length) return null;
         if(ey < yaxis._offset || ey > yaxis._offset + yaxis._length) return null;
         const phi=xaxis.p2d(ex - xaxis._offset);
-        const psi=yaxis.p2d(yaxis._length - (ey - yaxis._offset));
+        const psi=yaxis.p2d(ey - yaxis._offset);
         if(phi<-180||phi>180||psi<-180||psi>180) return null;
         return {phi,psi};
       }catch(e){ return null; }
