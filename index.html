@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ramachandran Animation — Phi Psi</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://3Dmol.csb.pitt.edu/build/3Dmol-min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+</head>
+<body>
+  <div style="font-size:150%;text-align:center;font-weight:bold;margin-top:10px;">
+    The Ramachandran Principle
+  </div>
+  <div style="font-size:130%;text-align:center;font-weight:bold;margin-bottom:8px;">
+    Phi (&phi;) and Psi (&psi;) Angles in Proteins
+  </div>
+  <div style="width:80%;text-align:center;margin:0 auto 10px auto;font-size:95%;color:#333;">
+    Interactive 3D viewer copied from <a href="https://bioinformatics.org/molvis/phipsi/" target="_blank">bioinformatics.org/molvis/phipsi</a>.
+    Drag to rotate. Use buttons to change Phi/Psi. Click on the Ramachandran plot to animate to that conformation.
+    <br><span style="font-size:85%;">Hosted on GitHub Pages — tripeptide Lys-Ala-Arg (16 atoms, central Ala16) — same colors/controls as original.</span>
+  </div>
+
+  <div id="app">
+    <!-- LEFT: viewer + controls below (controls panel mimics original right panel) -->
+    <div id="viewer-container">
+      <div id="viewer"></div>
+      <div id="controls">
+        <!-- hidden legacy controls for backward compat (kept but not displayed prominently) -->
+        <div class="row" style="display:none;">
+          <label>Residue:</label>
+          <input id="resi-input" type="number" min="15" max="17" value="16" style="width:60px" />
+          <button id="load-pdb">Load PDB (1CRN)</button>
+          <button id="load-tripeptide" style="display:none;">Load tripeptide</button>
+        </div>
+
+        <!-- Element color key (same as original) -->
+        <div class="row" style="text-align:center;margin-bottom:8px;">
+          <span style="font-size:130%;font-weight:bold;background-color:#d0d0d0;padding:4px 8px;" title="Chemical element color key">
+            <font color="#383838">C&alpha;</font>
+            <font color="#808080">C</font>
+            <font color="#ffffff" style="text-shadow:0 0 2px #000;">H</font>
+            <font color="#3050F8">N</font>
+            <font color="#ff2020">O</font>
+          </span>
+        </div>
+
+        <!-- Phi/Psi values (original ids phiangle/psiangle + compat phi-val/psi-val) -->
+        <div class="row" style="display:flex;justify-content:space-between;align-items:center;background:#e8ffe8;padding:6px;border:1px solid #b5e6b5;">
+          <div>
+            <span id="phi-label" style="font-weight:bold;color:#00c800;">Phi &phi;:</span>
+            <span id="phiangle" style="font-size:130%;font-weight:bold;color:#00c800;">165&deg;</span>
+            <span id="phi-val" style="display:none;">165</span>
+          </div>
+          <div>
+            <span id="psi-label" style="font-weight:bold;color:#00c800;">Psi &psi;:</span>
+            <span id="psiangle" style="font-size:130%;font-weight:bold;color:#00c800;">165&deg;</span>
+            <span id="psi-val" style="display:none;">165</span>
+          </div>
+        </div>
+
+        <!-- 4 buttons as requested: +15 phi, -15 phi, +15 psi, -15 psi (all must respond) -->
+        <div class="row" style="text-align:center;margin:8px 0;">
+          <button id="phi-plus" class="rotationbutton" title="Increase Phi by 15°">+15 Phi</button>
+          <button id="phi-minus" class="rotationbutton" title="Decrease Phi by 15°">-15 Phi</button>
+          <button id="psi-plus" class="rotationbutton" title="Increase Psi by 15°">+15 Psi</button>
+          <button id="psi-minus" class="rotationbutton" title="Decrease Psi by 15°">-15 Psi</button>
+        </div>
+        <div class="row" style="text-align:center;font-size:85%;color:#666;margin-top:-4px;">
+          (Gradual 2&deg; steps, same as original +20&deg; animation)
+        </div>
+
+        <!-- Original checkboxes -->
+        <div class="row" style="margin-top:10px;">
+          <label class="container">
+            <input type="checkbox" id="idalanine" />Alanine
+            <span class="checkmark"></span>
+          </label>
+          <label class="container">
+            <input type="checkbox" id="idpeptidebonds" /><font color="#ff40ff">Peptide Bonds</font>
+            <span class="checkmark"></span>
+          </label>
+          <label class="container">
+            <input type="checkbox" id="idplanes" />Planes
+            <span class="checkmark"></span>
+          </label>
+          <label class="container">
+            <input type="checkbox" id="idvdw" />van der Waals
+            <span class="checkmark"></span>
+          </label>
+          <div id="divwhite" style="display:none;margin-left:14px;">
+            <label class="container">
+              <input type="checkbox" id="idwhite" />&nbsp;&nbsp;&nbsp;&nbsp;White
+              <span class="checkmark" style="margin-left:20px;"></span>
+            </label>
+          </div>
+          <label class="container">
+            <input type="checkbox" id="idclashes" />Show Clashes
+            <span class="checkmark"></span>
+          </label>
+          <div id="divtrailclashes" style="display:none;margin-left:14px;">
+            <label class="container">
+              <input type="checkbox" id="idtrailclashes" />&nbsp;&nbsp;&nbsp;&nbsp;Trail Clashes
+              <span class="checkmark" style="margin-left:20px;"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="row" style="text-align:center;margin-top:10px;">
+          <input type="button" class="resetbutton" id="resetBtn" value="Reset" />
+          <span style="font-size:80%;color:#666;margin-left:8px;">Resets to 165&deg;/165&deg;</span>
+        </div>
+
+        <div class="row" style="font-size:80%;color:#555;margin-top:8px;border-top:1px solid #ddd;padding-top:6px;">
+          <b>Controls copied from original:</b> same atom colors (C #c8c8c8, C&alpha; #707070, N #6580FF, O #FF6060, bonds white, Phi bond green #80ff80), same button style (#d8ffd8/#4CAF50), same checkbox style. Planes and clashes approximated with 3Dmol.
+        </div>
+      </div>
+    </div>
+
+    <div id="plot-container">
+      <div id="ramaplot"></div>
+      <div style="font-size:80%;color:#444;padding:6px;text-align:center;">
+        Typical Ramachandran heatplot (alpha, beta, left-handed). Red dot = current Phi/Psi, red crosshairs. <b>Click anywhere</b> to animate.
+      </div>
+    </div>
+  </div>
+
+  <div style="text-align:center;font-size:80%;color:#666;margin:10px 0 20px 0;">
+    Original tutorial by <a href="http://martz.molviz.org" target="_blank">Eric Martz</a> — CC BY-NC-SA 4.0 — JSmol by Bob Hanson. This clone uses 3Dmol.js + Plotly and is hosted on GitHub Pages.
+    <br>Original PDB: <code>phipsi-16atoms.pdb</code> (Lys15-Ala16-Arg17, 16 atoms, 2 models). Static plot image replaced by interactive heatplot.
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
