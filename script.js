@@ -613,17 +613,75 @@ function clearClashes(){
     clashShapes=[];
   }
 }
-function makeClashPair(a,b){
+function ensureVdwForClash(){
+  // When Show Clashes is on, ensure VdW spheres exist (even if VdW checkbox is off)
+  // We use vdwShapes as the VdW overlay; if empty and clashes need them, create them
+  if(vdwShapes.length===0){
+    const radii={H:1.20, C:1.70, N:1.55, O:1.52};
+    const isWhite=document.getElementById('idwhite')?.checked;
+    atomsData.forEach(a=>{
+      const ra=radii[a.elem]||1.5;
+      let col=isWhite?'white':(a.atom==='CA'?'#000000':a.elem==='N'?'#3050ff':a.elem==='O'?'#ff2020':a.elem==='H'?'white':'#c8c8c8');
+      const op=isWhite?0.28:0.32;
+      const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:op});
+      vdwShapes.push(s);
+    });
+  }
+}
+function updateVdwClashColors(overlaps){
+  // overlaps: Map from atom serial -> max overlap (0 if none)
+  // Update each vdwShape's color/opacity to green->red scale
+  const maxOverlap = 0.8; // ~0.8Å is severe
+  vdwShapes.forEach((shape, idx)=>{
+    const atom=atomsData[idx];
+    if(!atom) return;
+    const ov=overlaps.get(atom.serial) || 0;
+    const t=Math.min(1, Math.max(0, ov / maxOverlap));
+    // green (0,200,0) -> yellow (200,200,0) -> red (200,0,0) ; interpolate
+    let r,g;
+    if(t<0.5){ r=Math.round(400*t); g=200; } else { r=200; g=Math.round(400*(1-t)); }
+    const col=`rgb(${r},${g},0)`;
+    const op= ov>0 ? 0.45 + t*0.50 : 0.32; // 0.32 -> 0.95
+    try{
+      // 3Dmol shapes have color and opacity; we recreate for simplicity
+      // Remove old and add new at same position with new color
+      viewer.removeShape(shape);
+    }catch(e){}
+  });
+  // Re-create with new colors (simpler than updating)
+  const newShapes=[];
+  const isWhite=document.getElementById('idwhite')?.checked;
+  const radii={H:1.20, C:1.70, N:1.55, O:1.52};
+  atomsData.forEach(a=>{
+    const ra=radii[a.elem]||1.5;
+    const ov=overlaps.get(a.serial)||0;
+    const t=Math.min(1, ov/0.8);
+    let col;
+    if(isWhite && ov===0) col='white';
+    else if(ov===0){
+      // keep element color with low alpha when no clash, but user wants green->red, so use green for no clash
+      col='rgb(60,200,60)';
+    } else {
+      let r,g;
+      if(t<0.5){ r=Math.round(400*t); g=200; } else { r=200; g=Math.round(400*(1-t)); }
+      col=`rgb(${r},${g},0)`;
+    }
+    const op= ov>0 ? 0.55 + t*0.40 : (isWhite?0.28:0.32);
+    const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:op});
+    newShapes.push(s);
+  });
+  // clear old array and replace
+  vdwShapes=newShapes;
+  viewer.render();
+}
+function makeClashPair(a,b, overlaps){
   if(!a||!b) return;
   const radii={H:1.20, C:1.70, N:1.55, O:1.52, S:1.80};
   const scale=0.88;
   const dx=a.x-b.x, dy=a.y-b.y, dz=a.z-b.z;
   const d=Math.hypot(dx,dy,dz);
   if(d>4.5) return;
-  // skip directly bonded (1-2) – distance ~1.0-1.5 but they are bonded; original excludes bonded via contact definition
-  // Use a simple bonded check: if they share a bond (distance <1.65 and are 1-2), skip? For tripeptide, bonded pairs are: 15 CA-C, C-O, C-N, N-CA, CA-C, C-O, C-N, N-CA, CA-CB, etc. We skip d<1.6 for bonded
   if(d<1.65){
-    // check if they are known bonded pairs in tripeptide – skip
     const bondedPairs=[
       ['15','CA','15','C'],['15','C','15','O'],['15','C','16','N'],
       ['16','N','16','CA'],['16','CA','16','C'],['16','C','16','O'],['16','CA','16','CB'],['16','CA','16','HA'],
@@ -639,15 +697,10 @@ function makeClashPair(a,b){
   const sum=(ra+rb)*scale;
   if(d < sum){
     const overlap=sum-d;
-    const mid={x:(a.x+b.x)/2, y:(a.y+b.y)/2, z:(a.z+b.z)/2};
-    // red lens at overlap – non-transparent as requested
-    const r=Math.min(0.85, 0.30 + overlap*0.7);
-    const s=viewer.addSphere({center:mid, radius:r, color:'red', opacity:0.98});
-    clashShapes.push(s);
-    // also add a small red cap on each atom's vdW surface for emphasis
-    const s2=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*scale*0.42, color:'red', opacity:0.92});
-    const s3=viewer.addSphere({center:{x:b.x,y:b.y,z:b.z}, radius:rb*scale*0.42, color:'red', opacity:0.92});
-    clashShapes.push(s2,s3);
+    // record max overlap for each atom
+    const curA=overlaps.get(a.serial)||0, curB=overlaps.get(b.serial)||0;
+    if(overlap > curA) overlaps.set(a.serial, overlap);
+    if(overlap > curB) overlaps.set(b.serial, overlap);
   }
 }
 function updateClashes(){
@@ -656,21 +709,28 @@ function updateClashes(){
     clashShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
     clashShapes=[];
   }
-  // Use original's 5 clash checks (88%)
+  // Ensure VdW spheres exist for coloring (even if VdW checkbox off, we need them for clash viz)
+  ensureVdwForClash();
+  const overlaps=new Map(); // serial -> max overlap
   const sidechain=['CB','1HB','2HB','3HB'].map(n=>findAtom(16,n)).filter(Boolean);
   const ca1=[findAtom(15,'O'),findAtom(16,'H'),findAtom(16,'O'),findAtom(17,'H')].filter(Boolean);
-  sidechain.forEach(sc=> ca1.forEach(c=> makeClashPair(sc,c)));
+  sidechain.forEach(sc=> ca1.forEach(c=> makeClashPair(sc,c, overlaps)));
   const o15=findAtom(15,'O');
   const h17=findAtom(17,'H'), n17=findAtom(17,'N');
-  if(o15&&h17) makeClashPair(o15,h17);
-  if(o15&&n17) makeClashPair(o15,n17);
+  if(o15&&h17) makeClashPair(o15,h17, overlaps);
+  if(o15&&n17) makeClashPair(o15,n17, overlaps);
   const o16=findAtom(16,'O');
-  if(o15&&o16) makeClashPair(o15,o16);
+  if(o15&&o16) makeClashPair(o15,o16, overlaps);
   const h16=findAtom(16,'H');
-  if(h16&&h17) makeClashPair(h16,h17);
+  if(h16&&h17) makeClashPair(h16,h17, overlaps);
   const ha=findAtom(16,'HA');
-  if(ha&&o15) makeClashPair(ha,o15);
-  if(ha&&h17) makeClashPair(ha,h17);
+  if(ha&&o15) makeClashPair(ha,o15, overlaps);
+  if(ha&&h17) makeClashPair(ha,h17, overlaps);
+  // If no clashes, overlaps will be empty -> all green low alpha
+  updateVdwClashColors(overlaps);
+  // For trail mode, keep previous clashShapes (which are now VdW recolored, not separate), so nothing else
+  // For non-trail, we already cleared clashShapes, but we are not using clashShapes for separate spheres anymore
+  // Keep clashShapes empty as VdW now carries the visualization
   viewer.render();
 }
 function doClashes(checked){
@@ -680,8 +740,26 @@ function doClashes(checked){
     if(trailDiv) trailDiv.style.display='';
     updateClashes();
   } else {
+    // restore VdW to normal element colors
     clashShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
     clashShapes=[];
+    // remove clash-colored VdW and restore normal VdW if VdW was on, else remove all
+    vdwShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
+    vdwShapes=[];
+    if(showVDW){
+      // re-create normal VdW
+      const radii={H:1.20, C:1.70, N:1.55, O:1.52};
+      const isWhite=document.getElementById('idwhite')?.checked;
+      atomsData.forEach(a=>{
+        const ra=radii[a.elem]||1.5;
+        let col=isWhite?'white':(a.atom==='CA'?'#000000':a.elem==='N'?'#3050ff':a.elem==='O'?'#ff2020':a.elem==='H'?'white':'#c8c8c8');
+        const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:isWhite?0.28:0.38});
+        vdwShapes.push(s);
+      });
+    } else {
+      // VdW was off, but we created VdW for clash display – now remove them
+      // leave no VdW
+    }
     if(trailDiv){ trailDiv.style.display='none'; document.getElementById('idtrailclashes').checked=false; trailClashes=false; }
     viewer.render();
   }
@@ -689,9 +767,10 @@ function doClashes(checked){
 function doTrailClashes(checked){
   trailClashes=checked;
   if(!checked){
-    clashShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
-    clashShapes=[];
-    if(showClashes) updateClashes(); else viewer.render();
+    // clear trail – for new model we just clear and if clashes still on, it will be recomputed on next rotation
+    // For now, if clashes on and trail off, next updateClashes will clear previous (since trail false)
+    // We keep current VdW colors until next move
+    viewer.render();
   }
 }
 function resetViewer(){
