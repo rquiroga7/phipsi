@@ -203,12 +203,12 @@ function applyOriginalStyle(){
   viewer.addStyle({atom:'CA'}, {sphere:{color:'#505050', scale:0.32}}); // Calpha darker gray #505050 than other C #c8c8c8
   viewer.addStyle({elem:'N'}, {sphere:{color:'#3050ff'}});
   viewer.addStyle({elem:'O'}, {sphere:{color:'#ff2020'}});
-  viewer.setStyle({elem:'H'}, {sphere:{color:'#ffffff', scale:0.80, hidden:false}, stick:{color:'white', radius:0.15, hidden:false}});
-  viewer.addStyle({atom:'H'}, {sphere:{color:'#ffffff', scale:0.80, hidden:false}});
-  viewer.addStyle({atom:'HA'}, {sphere:{color:'#ffffff', scale:0.80, hidden:false}});
-  viewer.addStyle({atom:'1HB'}, {sphere:{color:'#ffffff', scale:0.80, hidden:false}});
-  viewer.addStyle({atom:'2HB'}, {sphere:{color:'#ffffff', scale:0.80, hidden:false}});
-  viewer.addStyle({atom:'3HB'}, {sphere:{color:'#ffffff', scale:0.80, hidden:false}});
+  viewer.setStyle({elem:'H'}, {sphere:{color:'white', scale:0.25, hidden:false}, stick:{color:'white', radius:0.12, hidden:false}});
+  viewer.addStyle({atom:'H'}, {sphere:{color:'white', scale:0.25, hidden:false}});
+  viewer.addStyle({atom:'HA'}, {sphere:{color:'white', scale:0.25, hidden:false}});
+  viewer.addStyle({atom:'1HB'}, {sphere:{color:'white', scale:0.25, hidden:false}});
+  viewer.addStyle({atom:'2HB'}, {sphere:{color:'white', scale:0.25, hidden:false}});
+  viewer.addStyle({atom:'3HB'}, {sphere:{color:'white', scale:0.25, hidden:false}});
   viewer.addStyle({}, {stick:{color:'white', radius:0.12, hidden:false}});
   viewer.render();
   // add dotted partial double bonds for peptide and carbonyl (always visible, like original)
