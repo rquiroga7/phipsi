@@ -68,9 +68,10 @@ function generatePDB(atoms){
 }
 function syncModelPositions(){
   if(!model) return;
-  // Try direct atom copy first, then also use setCoordinates for GLModel internal frames
   try{
-    const mAtoms=model.atoms || viewer.getModel(0)?.atoms;
+    const m = viewer.getModel(0) || model;
+    // update raw atoms and frames
+    const mAtoms = m.atoms;
     if(mAtoms){
       for(let i=0;i<atomsData.length && i<mAtoms.length;i++){
         mAtoms[i].x=atomsData[i].x;
@@ -78,11 +79,33 @@ function syncModelPositions(){
         mAtoms[i].z=atomsData[i].z;
       }
     }
-    // also update via setCoordinates to ensure WebGL buffers refresh (3Dmol caches)
-    if(model.setCoordinates){
-      try{ model.setCoordinates(generatePDB(atomsData),'pdb'); }catch(e){}
+    if(m.frames && m.frames[0]){
+      const f=m.frames[0];
+      for(let i=0;i<atomsData.length && i<f.length;i++){
+        f[i].x=atomsData[i].x;
+        f[i].y=atomsData[i].y;
+        f[i].z=atomsData[i].z;
+      }
     }
-  }catch(e){}
+    // also try setCoordinates
+    if(m.setCoordinates){
+      try{ m.setCoordinates(generatePDB(atomsData),'pdb'); }catch(e){}
+    }
+    // force geometry refresh by re-applying ball-and-stick style (preserves view)
+    const view=viewer.getView();
+    viewer.setStyle({}, {stick:{radius:0.12, color:'white'}, sphere:{scale:0.30}});
+    viewer.addStyle({elem:'C'}, {sphere:{color:'#c8c8c8'}});
+    viewer.addStyle({atom:'CA'}, {sphere:{color:'#000000'}});
+    viewer.addStyle({elem:'N'}, {sphere:{color:'#3050ff'}});
+    viewer.addStyle({elem:'O'}, {sphere:{color:'#ff2020'}});
+    viewer.addStyle({elem:'H'}, {sphere:{color:'white', scale:0.20}});
+    viewer.addStyle({}, {stick:{color:'white', radius:0.12}});
+    try{ viewer.setView(view); }catch(e){}
+  }catch(e){
+    // fallback to full rebuild if sync fails
+    rebuildModel(true);
+    return;
+  }
   viewer.render();
 }
 function rebuildModel(preserveView){
