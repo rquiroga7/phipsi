@@ -365,6 +365,45 @@ function rotateAtomsAboutAxis(axisA, axisB, angleDeg, predicate){
     a.z=rot.z+axisA.z;
   });
   syncModelPositions();
+  updateDoubleBonds();
+  if(window._lastHighlight) highlightPhiPsi(window._lastHighlight);
+  if(showPlanes) updatePlanes();
+  if(showPeptideBondsFlag) doPeptideBonds(true);
+  if(showVDW){
+    // update VdW spheres to new positions (keep overlay)
+    vdwShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
+    vdwShapes=[];
+    const radii={H:1.20, C:1.70, N:1.55, O:1.52};
+    const isWhite=document.getElementById('idwhite')?.checked;
+    atomsData.forEach(a=>{
+      const ra=radii[a.elem]||1.5;
+      let col='#c8c8c8';
+      if(isWhite) col='white';
+      else {
+        if(a.atom==='CA') col='#000000';
+        else if(a.elem==='N') col='#3050ff';
+        else if(a.elem==='O') col='#ff2020';
+        else if(a.elem==='H') col='white';
+      }
+      const op=isWhite?0.28:0.38;
+      const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:op});
+      vdwShapes.push(s);
+    });
+    // if clashes also on, recolor after
+    if(showClashes) updateClashes();
+  } else if(showClashes){
+    // VdW off but clashes on: ensure VdW for clash viz is updated
+    updateClashes();
+  }
+  if(alanineShapes.length>0){
+    alanineShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
+    alanineShapes=[];
+    const alaAtoms=atomsData.filter(a=>a.resi===16);
+    alaAtoms.forEach(a=>{
+      const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:0.9, color:'black', opacity:0.18});
+      alanineShapes.push(s);
+    });
+  }
 }
 
 function isMovingAtomForPhi(atom){
@@ -957,7 +996,34 @@ function moveToPhiPsi(targetPhi,targetPsi){
       }
     }
     syncModelPositions();
-    // update marker smoothly (model and all extras already re-added via rebuild)
+    updateDoubleBonds();
+    if(showPlanes) updatePlanes();
+    if(showPeptideBondsFlag) doPeptideBonds(true);
+    if(showVDW){
+      vdwShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
+      vdwShapes=[];
+      const radii={H:1.20, C:1.70, N:1.55, O:1.52};
+      const isWhite=document.getElementById('idwhite')?.checked;
+      atomsData.forEach(a=>{
+        const ra=radii[a.elem]||1.5;
+        let col=isWhite?'white':(a.atom==='CA'?'#000000':a.elem==='N'?'#3050ff':a.elem==='O'?'#ff2020':a.elem==='H'?'white':'#c8c8c8');
+        const op=isWhite?0.28:0.38;
+        const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:op});
+        vdwShapes.push(s);
+      });
+      if(showClashes) updateClashes();
+    } else if(showClashes){
+      updateClashes();
+    }
+    if(alanineShapes.length>0){
+      alanineShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
+      alanineShapes=[];
+      const alaAtoms=atomsData.filter(a=>a.resi===16);
+      alaAtoms.forEach(a=>{
+        const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:0.9, color:'black', opacity:0.18});
+        alanineShapes.push(s);
+      });
+    }
     const curStep=getPhiPsi();
     updatePlotMarker(curStep.phi, curStep.psi);
     if(i % 3 ===0){
