@@ -67,8 +67,28 @@ function generatePDB(atoms){
   return out;
 }
 function syncModelPositions(){
-  // Use full rebuild to ensure ball-and-stick WebGL buffers refresh correctly
-  rebuildModel(true);
+  // Fast path: update atoms in-place (no viewer.clear / rebuild) - keeps all shapes
+  if(!model) return;
+  try{
+    const m = viewer.getModel(0) || model;
+    const mAtoms = m.atoms;
+    if(mAtoms){
+      for(let i=0;i<atomsData.length && i<mAtoms.length;i++){
+        mAtoms[i].x=atomsData[i].x;
+        mAtoms[i].y=atomsData[i].y;
+        mAtoms[i].z=atomsData[i].z;
+      }
+    }
+    if(m.frames && m.frames[0]){
+      const f=m.frames[0];
+      for(let i=0;i<atomsData.length && i<f.length;i++){
+        f[i].x=atomsData[i].x;
+        f[i].y=atomsData[i].y;
+        f[i].z=atomsData[i].z;
+      }
+    }
+  }catch(e){}
+  viewer.render();
 }
 function rebuildModel(preserveView){
   let view=null;
@@ -699,6 +719,7 @@ function makeClashPair(a,b, overlaps){
     const segs=18;
     const verts=[];
     const normals=[];
+    const colors=[];
     for(let i=0;i<=segs;i++){
       const ang=i/segs*Math.PI*2;
       const cosA=Math.cos(ang), sinA=Math.sin(ang);
@@ -707,28 +728,26 @@ function makeClashPair(a,b, overlaps){
       const rz=cz + lensR*(vz*cosA + wz*sinA);
       verts.push(new $3Dmol.Vector3(rx,ry,rz));
       normals.push(new $3Dmol.Vector3(ux,uy,uz));
+      colors.push({r:1.0, g:0.6, b:0.0});
     }
     // center vertex
     verts.push(new $3Dmol.Vector3(cx,cy,cz));
     normals.push(new $3Dmol.Vector3(ux,uy,uz));
+    colors.push({r:1.0, g:0.6, b:0.0});
     const faces=[];
     for(let i=0;i<segs;i++){
       faces.push(i, segs, (i+1)%segs);
     }
-    // 3Dmol addCustom requires color per vertex or single color
-    const colorArr=[];
-    for(let i=0;i<=segs;i++) colorArr.push({r:1.0, g:0.6, b:0.0});
-    colorArr.push({r:1.0, g:0.6, b:0.0});
-    // use addCustom with vertices/normals/faces; color as single color via spec.color
-    const spec={vertexArr:verts, normalArr:normals, faceArr:faces};
+    const spec={vertexArr:verts, normalArr:normals, faceArr:faces, color:colors, opacity:0.6};
     try{
-      // 3Dmol addCustom accepts color:{r,g,b} for whole shape (and optional color array)
-      spec.color={r:1.0, g:0.6, b:0.0};
       const shape=viewer.addCustom(spec);
+      // set opacity on the shape material (3Dmol custom shapes support spec.opacity)
+      if(shape && shape.setColor){
+        try{ shape.setColor(0xffaa00, 0.6); }catch(e){}
+      }
       clashShapes.push(shape);
     }catch(e){
-      // fallback to small sphere
-      const s=viewer.addSphere({center:{x:cx,y:cy,z:cz}, radius:lensR*0.7, color:'orange', opacity:0.96});
+      const s=viewer.addSphere({center:{x:cx,y:cy,z:cz}, radius:lensR*0.75, color:'orange', opacity:0.6});
       clashShapes.push(s);
     }
   }
