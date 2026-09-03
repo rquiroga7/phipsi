@@ -713,9 +713,9 @@ function makeClashPair(a,b, overlaps){
     // ---------- Cap of sphere a (points on A's surface inside B) ----------
     const thMaxA=Math.acos(Math.min(1, Math.max(-1, t/raa)));
     const ringA=[];
-    verts.push(a.x+raa*ux, a.y+raa*uy, a.z+raa*uz);
-    normals.push(ux,uy,uz);
-    const poleA=verts.length/3-1;
+    verts.push({x:a.x+raa*ux, y:a.y+raa*uy, z:a.z+raa*uz});
+    normals.push({x:ux, y:uy, z:uz});
+    const poleA=verts.length-1;
     for(let k=1;k<=rings;k++){
       const th=thMaxA*k/rings, st=Math.sin(th), ct=Math.cos(th);
       const ring=[];
@@ -723,9 +723,9 @@ function makeClashPair(a,b, overlaps){
         const ph=i/segs*2*Math.PI, cp=Math.cos(ph), sp=Math.sin(ph);
         const lx=st*cp, ly=st*sp;
         const rdx=lx*vx+ly*wx+ct*ux, rdy=lx*vy+ly*wy+ct*uy, rdz=lx*vz+ly*wz+ct*uz;
-        verts.push(a.x+raa*rdx, a.y+raa*rdy, a.z+raa*rdz);
-        normals.push(rdx,rdy,rdz);
-        ring.push(verts.length/3-1);
+        verts.push({x:a.x+raa*rdx, y:a.y+raa*rdy, z:a.z+raa*rdz});
+        normals.push({x:rdx, y:rdy, z:rdz});
+        ring.push(verts.length-1);
       }
       ringA.push(ring);
     }
@@ -742,9 +742,9 @@ function makeClashPair(a,b, overlaps){
     // ---------- Cap of sphere b (points on B's surface inside A) ----------
     const thMaxB=Math.acos(Math.min(1, Math.max(-1, (d-t)/rbb)));
     const ringB=[];
-    verts.push(b.x-rbb*ux, b.y-rbb*uy, b.z-rbb*uz);
-    normals.push(-ux,-uy,-uz);
-    const poleB=verts.length/3-1;
+    verts.push({x:b.x-rbb*ux, y:b.y-rbb*uy, z:b.z-rbb*uz});
+    normals.push({x:-ux, y:-uy, z:-uz});
+    const poleB=verts.length-1;
     for(let k=1;k<=rings;k++){
       const th=thMaxB*k/rings, st=Math.sin(th), ct=Math.cos(th);
       const ring=[];
@@ -752,9 +752,9 @@ function makeClashPair(a,b, overlaps){
         const ph=i/segs*2*Math.PI, cp=Math.cos(ph), sp=Math.sin(ph);
         const lx=st*cp, ly=st*sp;
         const rdx=lx*vx+ly*wx-ct*ux, rdy=lx*vy+ly*wy-ct*uy, rdz=lx*vz+ly*wz-ct*uz;
-        verts.push(b.x+rbb*rdx, b.y+rbb*rdy, b.z+rbb*rdz);
-        normals.push(rdx,rdy,rdz);
-        ring.push(verts.length/3-1);
+        verts.push({x:b.x+rbb*rdx, y:b.y+rbb*rdy, z:b.z+rbb*rdz});
+        normals.push({x:rdx, y:rdy, z:rdz});
+        ring.push(verts.length-1);
       }
       ringB.push(ring);
     }
