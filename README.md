@@ -4,7 +4,7 @@ Static site cloning the 3D graphics and controls from **https://bioinformatics.o
 
 - **3D viewer**: 3Dmol.js rendering the same tripeptide `phipsi-16atoms.pdb` (Lys15-Ala16-Arg17, 16 atoms, central Ala16). Same colors as original: C `#c8c8c8`, Cα `#707070`, N `#6580FF`, O `#FF6060`, bonds white, Phi bond green `#80ff80`, peptide bonds magenta `#ff80ff` when enabled, background `#d0d0d0`.
 - **Same controls** as original (custom checkbox styling from `input.css`): **Alanine** (black dots 60%), **Peptide Bonds** (magenta), **Planes** (peptide planes), **van der Waals** (88% translucent, **White** toggle), **Show Clashes** (orange contacts, **Trail Clashes**), **Reset**. Same button styling `.rotationbutton` `#d8ffd8`/`#4CAF50`.
-- **New Ramachandran heatplot**: Plotly heatmap (alpha/beta/left-handed Gaussians) with **red dot** and **red X/Y crosshairs** tracking current Phi/Psi. **Click anywhere** on the plot to animate the structure gradually to that Phi/Psi (same gradual animation as the +/- buttons).
+- **New Ramachandran heatplot**: Plotly heatmap of real backbone φ/ψ density (30,394 residues from 60 diverse PDB structures, Gly/Pro excluded, 5° grid, white→red colorscale) with **red dot** and **red X/Y crosshairs** tracking current Phi/Psi. **Click anywhere** on the plot to animate the structure gradually to that Phi/Psi (same gradual animation as the +/- buttons).
 - **Four buttons** (instead of original Phi/Psi selector + +/-20°): `+15 Phi`, `-15 Phi`, `+15 Psi`, `-15 Psi` — all animate in 2° steps (10 steps) with live Phi/Psi display and plot marker update. Non-3D tutorial text and static JPG plot removed; only 3D viewer + controls + interactive plot remain.
 
 ## Local use
