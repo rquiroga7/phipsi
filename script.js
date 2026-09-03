@@ -67,70 +67,56 @@ function generatePDB(atoms){
   return out;
 }
 function syncModelPositions(){
-  if(!model) return;
-  try{
-    const m = viewer.getModel(0) || model;
-    // update raw atoms and frames
-    const mAtoms = m.atoms;
-    if(mAtoms){
-      for(let i=0;i<atomsData.length && i<mAtoms.length;i++){
-        mAtoms[i].x=atomsData[i].x;
-        mAtoms[i].y=atomsData[i].y;
-        mAtoms[i].z=atomsData[i].z;
-      }
-    }
-    if(m.frames && m.frames[0]){
-      const f=m.frames[0];
-      for(let i=0;i<atomsData.length && i<f.length;i++){
-        f[i].x=atomsData[i].x;
-        f[i].y=atomsData[i].y;
-        f[i].z=atomsData[i].z;
-      }
-    }
-    // also try setCoordinates
-    if(m.setCoordinates){
-      try{ m.setCoordinates(generatePDB(atomsData),'pdb'); }catch(e){}
-    }
-    // force geometry refresh by re-applying ball-and-stick style (preserves view)
-    const view=viewer.getView();
-    viewer.setStyle({}, {stick:{radius:0.12, color:'white'}, sphere:{scale:0.30}});
-    viewer.addStyle({elem:'C'}, {sphere:{color:'#c8c8c8'}});
-    viewer.addStyle({atom:'CA'}, {sphere:{color:'#000000'}});
-    viewer.addStyle({elem:'N'}, {sphere:{color:'#3050ff'}});
-    viewer.addStyle({elem:'O'}, {sphere:{color:'#ff2020'}});
-    viewer.addStyle({elem:'H'}, {sphere:{color:'white', scale:0.20}});
-    viewer.addStyle({}, {stick:{color:'white', radius:0.12}});
-    try{ viewer.setView(view); }catch(e){}
-  }catch(e){
-    // fallback to full rebuild if sync fails
-    rebuildModel(true);
-    return;
-  }
-  viewer.render();
+  // Use full rebuild to ensure ball-and-stick updates correctly (direct copy was not refreshing WebGL buffers)
+  rebuildModel(true);
 }
 function rebuildModel(preserveView){
   let view=null;
   if(preserveView && viewer) try{ view=viewer.getView(); }catch(e){}
-  // preserve shape flags to re-add after clear
-  const hadPlanes=showPlanes, hadClash=showClashes, hadPep=window._pepShapes && window._pepShapes.length>0, hadAlanine=alanineShapes.length>0;
+  const hadPlanes=showPlanes, hadClash=showClashes, hadPep=showPeptideBondsFlag, hadAlanine=alanineShapes.length>0, hadVDW=showVDW, hadWhite=document.getElementById('idwhite')?.checked, hadHighlight=window._lastHighlight;
+  const hadTrail=trailClashes;
+  // keep clashShapes if trail, else clear
+  if(!hadTrail) clashShapes=[];
   viewer.clear();
-  doubleBondShapes=[]; planeShapes=[]; // will be re-added
-  // keep clashShapes if trailClashes, otherwise clear
-  if(!trailClashes){ clashShapes=[]; } else {
-    // keep existing clash spheres – they are shapes, but viewer.clear removed them, need to keep array but shapes are gone
-    // so we just keep logical, but visual will be cleared – trail will be rebuilt
-  }
+  doubleBondShapes=[]; planeShapes=[]; vdwShapes=[];
+  // alanineShapes will be re-added via doAlanine, so clear array but keep flag
+  alanineShapes=[];
+  // viewer.clear removes all shapes, so need to clear arrays that held shape refs
+  if(window._pepShapes) window._pepShapes=[];
+  if(window._highlightShapes) window._highlightShapes=[];
+  if(window._customPlanes) window._customPlanes=[];
   const pdbText=generatePDB(atomsData);
   model=viewer.addModel(pdbText,'pdb');
-  applyOriginalStyle();
+  applyOriginalStyle(); // adds doubleBondShapes
   if(view) try{ viewer.setView(view); }catch(e){ viewer.zoomTo(); }
   else viewer.zoomTo();
   viewer.render();
-  // re-add persistent shapes that were visible before
   if(hadAlanine) doAlanine(true);
   if(hadPep) doPeptideBonds(true);
   if(hadPlanes) updatePlanes();
   if(hadClash) updateClashes();
+  if(hadVDW){
+    // re-add VdW overlay at new positions
+    const radii={H:1.20, C:1.70, N:1.55, O:1.52};
+    const isWhite=hadWhite;
+    vdwShapes=[];
+    atomsData.forEach(a=>{
+      const ra=radii[a.elem]||1.5;
+      let col='#c8c8c8';
+      if(isWhite) col='white';
+      else {
+        if(a.atom==='CA') col='#000000';
+        else if(a.elem==='N') col='#3050ff';
+        else if(a.elem==='O') col='#ff2020';
+        else if(a.elem==='H') col='white';
+      }
+      const op=isWhite?0.28:0.38;
+      const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:op});
+      vdwShapes.push(s);
+    });
+    viewer.render();
+  }
+  if(hadHighlight) highlightPhiPsi(hadHighlight);
 }
 
 function initViewer(){
@@ -361,62 +347,7 @@ function rotateAtomsAboutAxis(axisA, axisB, angleDeg, predicate){
     a.y=rot.y+axisA.y;
     a.z=rot.z+axisA.z;
   });
-  // sync coordinates to existing model without clearing viewer (keeps planes/bonds)
   syncModelPositions();
-  // keep dotted double bonds in place
-  updateDoubleBonds();
-  // keep highlight green bond in place
-  if(window._lastHighlight){
-    highlightPhiPsi(window._lastHighlight);
-  }
-  // keep planes if visible
-  if(showPlanes){
-    updatePlanes();
-  }
-  // keep peptide magenta bonds if visible
-  if(showPeptideBondsFlag){
-    doPeptideBonds(true);
-  }
-  // keep VdW overlay if visible (update to new atom positions)
-  if(showVDW){
-    vdwShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
-    vdwShapes=[];
-    const radii={H:1.20, C:1.70, N:1.55, O:1.52};
-    const isWhite=document.getElementById('idwhite')?.checked;
-    atomsData.forEach(a=>{
-      const ra=radii[a.elem]||1.5;
-      let col='#c8c8c8';
-      if(isWhite) col='white';
-      else {
-        if(a.atom==='CA') col='#000000';
-        else if(a.elem==='N') col='#3050ff';
-        else if(a.elem==='O') col='#ff2020';
-        else if(a.elem==='H') col='white';
-      }
-      const op=isWhite?0.28:0.38;
-      const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:op});
-      vdwShapes.push(s);
-    });
-  }
-  // keep Alanine black dots if visible
-  if(alanineShapes.length>0){
-    alanineShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
-    alanineShapes=[];
-    const alaAtoms=atomsData.filter(a=>a.resi===16);
-    alaAtoms.forEach(a=>{
-      const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:0.9, color:'black', opacity:0.18});
-      alanineShapes.push(s);
-    });
-  }
-  // keep clashes if visible (update to new positions)
-  if(showClashes){
-    // use makeClashPair logic – clear and re-add at new positions
-    // we call updateClashes which handles trail
-    // but to avoid double-clear, we just call it (it will clear if not trail)
-    // we need to avoid infinite loop: updateClashes will clear and re-add
-    // so we just call it
-    updateClashes();
-  }
 }
 
 function isMovingAtomForPhi(atom){
@@ -929,45 +860,8 @@ function moveToPhiPsi(targetPhi,targetPsi){
         });
       }
     }
-    // single sync per frame (not rebuild) to keep planes/bonds
     syncModelPositions();
-    updateDoubleBonds();
-    if(showPlanes) updatePlanes();
-    if(showPeptideBondsFlag) doPeptideBonds(true);
-    if(showVDW){
-      vdwShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
-      vdwShapes=[];
-      const radii={H:1.20, C:1.70, N:1.55, O:1.52};
-      const isWhite=document.getElementById('idwhite')?.checked;
-      atomsData.forEach(a=>{
-        const ra=radii[a.elem]||1.5;
-        let col='#c8c8c8';
-        if(isWhite) col='white';
-        else {
-          if(a.atom==='CA') col='#000000';
-          else if(a.elem==='N') col='#3050ff';
-          else if(a.elem==='O') col='#ff2020';
-          else if(a.elem==='H') col='white';
-        }
-        const op=isWhite?0.28:0.38;
-        const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:op});
-        vdwShapes.push(s);
-      });
-    }
-    if(alanineShapes.length>0){
-      alanineShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
-      alanineShapes=[];
-      const alaAtoms=atomsData.filter(a=>a.resi===16);
-      alaAtoms.forEach(a=>{
-        const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:0.9, color:'black', opacity:0.18});
-        alanineShapes.push(s);
-      });
-    }
-    if(showClashes){
-      // update clashes to new positions (keep trail if enabled)
-      updateClashes();
-    }
-    // update marker smoothly
+    // update marker smoothly (model and all extras already re-added via rebuild)
     const curStep=getPhiPsi();
     updatePlotMarker(curStep.phi, curStep.psi);
     if(i % 3 ===0){
