@@ -12,6 +12,7 @@ let showPeptideBondsFlag = false;
 let atomsData = []; // our source of truth for coordinates
 let doubleBondShapes = [];
 let vdwShapes = [];
+let clashAtomSerials = new Set();
 const PDB_FALLBACK = `ATOM      1  CA  LYS    15      -7.384  -4.928   3.141  1.00  0.00           C
 ATOM      2  C   LYS    15      -8.891  -4.877   3.059  1.00  0.00           C
 ATOM      3  O   LYS    15      -9.587  -5.900   3.158  1.00  0.00           O
@@ -387,6 +388,7 @@ function rotateAtomsAboutAxis(axisA, axisB, angleDeg, predicate){
     const radii={H:1.20, C:1.70, N:1.55, O:1.52};
     const isWhite=document.getElementById('idwhite')?.checked;
     atomsData.forEach(a=>{
+      if(showClashes && clashAtomSerials.has(a.serial)) return; // lens replaces this atom's VdW
       const ra=radii[a.elem]||1.5;
       let col='#c8c8c8';
       if(isWhite) col='white';
@@ -397,7 +399,7 @@ function rotateAtomsAboutAxis(axisA, axisB, angleDeg, predicate){
         else if(a.elem==='H') col='white';
       }
       const op=isWhite?0.28:0.38;
-      const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:showClashes? (isWhite?0.16:0.22) : op});
+      const s=viewer.addSphere({center:{x:a.x,y:a.y,z:a.z}, radius:ra*0.88, color:col, opacity:showClashes?(isWhite?0.16:0.22):op});
       vdwShapes.push(s);
     });
     // if clashes also on, recolor after
@@ -688,40 +690,92 @@ function makeClashPair(a,b, overlaps){
   const sum=(ra+rb)*scale;
   if(d < sum && d > 0.01){
     const raa=ra*scale, rbb=rb*scale;
-    // axis u from a to b, orthonormal basis v,w
+    // Intersection circle of the two VdW spheres: distance t from center a
+    const t=(raa*raa - rbb*rbb + d*d)/(2*d);
+    if(t < 0 || t > d) return; // fully contained – no lens
+    const lensR=Math.sqrt(Math.max(0, raa*raa - t*t));
+    if(!isFinite(lensR) || lensR<=0.01) return;
+    // Record clashing atoms so their VdW spheres are skipped (avoid depth occlusion)
+    clashAtomSerials.add(a.serial); clashAtomSerials.add(b.serial);
+    // axis unit u from a to b, plus perpendicular basis v,w
     const ux=(b.x-a.x)/d, uy=(b.y-a.y)/d, uz=(b.z-a.z)/d;
-    let vx=Math.abs(ux)<0.9?1:0, vy=Math.abs(ux)<0.9?0:1, vz=0;
-    const dvu=vx*ux+vy*uy+vz*uz;
-    vx-=dvu*ux; vy-=dvu*uy; vz-=dvu*uz;
+    let vx,vy,vz;
+    if(Math.abs(ux) < 0.9){ vx=1; vy=0; vz=0; }
+    else { vx=0; vy=1; vz=0; }
+    const dotvu=vx*ux+vy*uy+vz*uz;
+    vx-=dotvu*ux; vy-=dotvu*uy; vz-=dotvu*uz;
     const vl=Math.hypot(vx,vy,vz)||1;
     vx/=vl; vy/=vl; vz/=vl;
     const wx=uy*vz-uz*vy, wy=uz*vx-ux*vz, wz=ux*vy-uy*vx;
-    // Fill the exact intersection volume (sphere A ∩ sphere B) with small
-    // orange translucent spheres -> a smooth blobby lens, uniformly lit,
-    // no backface/dark side; tips poke slightly past the whitish VdW surface.
-    const lensR0=Math.sqrt(Math.max(0, raa*raa - Math.pow(Math.max(0,(raa*raa-rbb*rbb+d*d)/(2*d)),2)));
-    const rs=Math.min(0.20, lensR0*0.35);
-    const s1min=Math.max(0, d-rbb);
-    const s1max=Math.min(raa, d);
-    if(s1min >= s1max) return;
-    const step=rs*0.85;
-    for(let s1=s1min; s1<=s1max+1e-6; s1+=step){
-      const rlat=Math.min(Math.sqrt(Math.max(0, raa*raa-s1*s1)), Math.sqrt(Math.max(0, rbb*rbb-(d-s1)*(d-s1))));
-      if(rlat<=0.02) continue;
-      const ringN=Math.max(1, Math.round(rlat/step));
-      for(let k=0;k<ringN;k++){
-        const rr=(k+0.5)/ringN*rlat;
-        const nAng=Math.max(4, Math.round(2*Math.PI*rr/step));
-        for(let t2=0;t2<nAng;t2++){
-          const ang=t2/nAng*2*Math.PI, cp=Math.cos(ang), sp=Math.sin(ang);
-          const lx=rr*cp, ly=rr*sp;
-          const px=a.x+ux*s1+vx*lx+wx*ly;
-          const py=a.y+uy*s1+vy*lx+wy*ly;
-          const pz=a.z+uz*s1+vz*lx+wz*ly;
-          const s=viewer.addSphere({center:{x:px,y:py,z:pz}, radius:rs*1.35, color:'orange', opacity:0.85});
-          clashShapes.push(s);
-        }
+
+    const segs=18, rings=5;
+    const verts=[], normals=[], faces=[];
+    // ---------- Cap of sphere a (points on A's surface inside B) ----------
+    const thMaxA=Math.acos(Math.min(1, Math.max(-1, t/raa)));
+    const ringA=[];
+    verts.push(a.x+raa*ux, a.y+raa*uy, a.z+raa*uz);
+    normals.push(ux,uy,uz);
+    const poleA=verts.length/3-1;
+    for(let k=1;k<=rings;k++){
+      const th=thMaxA*k/rings, st=Math.sin(th), ct=Math.cos(th);
+      const ring=[];
+      for(let i=0;i<segs;i++){
+        const ph=i/segs*2*Math.PI, cp=Math.cos(ph), sp=Math.sin(ph);
+        const lx=st*cp, ly=st*sp;
+        const rdx=lx*vx+ly*wx+ct*ux, rdy=lx*vy+ly*wy+ct*uy, rdz=lx*vz+ly*wz+ct*uz;
+        verts.push(a.x+raa*rdx, a.y+raa*rdy, a.z+raa*rdz);
+        normals.push(rdx,rdy,rdz);
+        ring.push(verts.length/3-1);
       }
+      ringA.push(ring);
+    }
+    for(let i=0;i<segs;i++){
+      faces.push(poleA, ringA[0][(i+1)%segs], ringA[0][i]);
+    }
+    for(let k=0;k<rings-1;k++){
+      for(let i=0;i<segs;i++){
+        const i2=(i+1)%segs;
+        faces.push(ringA[k][i], ringA[k][i2], ringA[k+1][i2]);
+        faces.push(ringA[k][i], ringA[k+1][i2], ringA[k+1][i]);
+      }
+    }
+    // ---------- Cap of sphere b (points on B's surface inside A) ----------
+    const thMaxB=Math.acos(Math.min(1, Math.max(-1, (d-t)/rbb)));
+    const ringB=[];
+    verts.push(b.x-rbb*ux, b.y-rbb*uy, b.z-rbb*uz);
+    normals.push(-ux,-uy,-uz);
+    const poleB=verts.length/3-1;
+    for(let k=1;k<=rings;k++){
+      const th=thMaxB*k/rings, st=Math.sin(th), ct=Math.cos(th);
+      const ring=[];
+      for(let i=0;i<segs;i++){
+        const ph=i/segs*2*Math.PI, cp=Math.cos(ph), sp=Math.sin(ph);
+        const lx=st*cp, ly=st*sp;
+        const rdx=lx*vx+ly*wx-ct*ux, rdy=lx*vy+ly*wy-ct*uy, rdz=lx*vz+ly*wz-ct*uz;
+        verts.push(b.x+rbb*rdx, b.y+rbb*rdy, b.z+rbb*rdz);
+        normals.push(rdx,rdy,rdz);
+        ring.push(verts.length/3-1);
+      }
+      ringB.push(ring);
+    }
+    for(let i=0;i<segs;i++){
+      faces.push(poleB, ringB[0][(i+1)%segs], ringB[0][i]);
+    }
+    for(let k=0;k<rings-1;k++){
+      for(let i=0;i<segs;i++){
+        const i2=(i+1)%segs;
+        faces.push(ringB[k][i], ringB[k][i2], ringB[k+1][i2]);
+        faces.push(ringB[k][i], ringB[k+1][i2], ringB[k+1][i]);
+      }
+    }
+    // Single orange color + DoubleSide -> MeshDoubleLambertMaterial lights both caps
+    const spec={vertexArr:verts, normalArr:normals, faceArr:faces, color:0xffa500, opacity:0.85, side:2};
+    try{
+      const shape=viewer.addCustom(spec);
+      clashShapes.push(shape);
+    }catch(e){
+      const s=viewer.addSphere({center:{x:a.x+(b.x-a.x)*t/d, y:a.y+(b.y-a.y)*t/d, z:a.z+(b.z-a.z)*t/d}, radius:lensR*0.8, color:'orange', opacity:0.85});
+      clashShapes.push(s);
     }
   }
 }
@@ -731,6 +785,7 @@ function updateClashes(){
     clashShapes.forEach(s=>{ try{ viewer.removeShape(s);}catch(e){} });
     clashShapes=[];
   }
+  clashAtomSerials = new Set();
   // Orange lens at overlap only - do NOT auto-show VdW; keep VdW as is (if VdW off, only lenses show)
   const sidechain=['CB','1HB','2HB','3HB'].map(n=>findAtom(16,n)).filter(Boolean);
   const ca1=[findAtom(15,'O'),findAtom(16,'H'),findAtom(16,'O'),findAtom(17,'H')].filter(Boolean);
@@ -962,6 +1017,7 @@ function moveToPhiPsi(targetPhi,targetPsi){
       const radii={H:1.20, C:1.70, N:1.55, O:1.52};
       const isWhite=document.getElementById('idwhite')?.checked;
       atomsData.forEach(a=>{
+        if(showClashes && clashAtomSerials.has(a.serial)) return; // lens replaces this atom's VdW
         const ra=radii[a.elem]||1.5;
         let col=isWhite?'white':(a.atom==='CA'?'#000000':a.elem==='N'?'#3050ff':a.elem==='O'?'#ff2020':a.elem==='H'?'white':'#c8c8c8');
         const op=isWhite?0.28:0.38;
